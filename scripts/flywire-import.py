@@ -26,6 +26,20 @@ from collections import defaultdict
 from pathlib import Path
 
 
+# Which (super_class, class) pairs become which population. Anything not here is left out:
+# a group the app does not drive or read is weight in the file for nothing.
+GROUP_OF = {
+    ("sensory", "visual"): "visual",              # photoreceptors — the eyes
+    ("sensory", "mechanosensory"): "mechano",     # bristles, wind and hearing — touch
+    ("sensory", "olfactory"): "olfactory",        # antennal receptors — smell
+    ("sensory", "gustatory"): "gustatory",        # taste, on the proboscis and legs
+    ("descending", ""): "descending",             # brain → nerve cord: the motor command
+    ("descending", "ocellar"): "descending",
+    ("motor", "brain_motor_neuron"): "motor",     # proboscis and neck muscles
+    ("visual_projection", ""): "visual_projection",
+}
+
+
 def open_any(dir_: Path, stem: str):
     for name in (f"{stem}.csv.gz", f"{stem}.csv"):
         p = dir_ / name
@@ -66,13 +80,28 @@ def write_fcb(path: Path, edges: dict[tuple[int, int], int], sums: dict[int, lis
 
 
 def write_populations(path: Path, dir_: Path, cells: set[int]) -> None:
-    """Cell indices (fcb order = ascending root id) grouped by predicted neurotransmitter of
-    their output — DA (dopamine) is the reward population the app drives while the fly eats.
-    Read from the connections export's nt_type column, so no extra download is needed."""
+    """Cell indices (fcb order = ascending root id) grouped into the populations the app
+    actually drives and reads.
+
+    Two sources, both already downloaded:
+      * `connections.csv` nt_type — the predicted transmitter of a cell's output. "DA" is the
+        786-cell dopaminergic reward population.
+      * `classification.csv` — super_class, class, sub_class and **side** per cell. This is
+        what turns the simulation from a blob into anatomy: light goes into photoreceptors of
+        one eye, a touch into the bristles of one side, and the fly's steering is read off the
+        left and right descending neurons, which are the cells that actually carry commands
+        from the brain to the nerve cord.
+
+    Keys are `group` or `group.side`, e.g. `visual.left`, `descending.right`, `mechano.left`.
+    Without classification.csv only the transmitter groups are written, and the app falls back
+    to its whole-brain readout — so the file is an upgrade, not a requirement.
+    """
     import json
 
     ids = sorted(cells)
     index = {rid: i for i, rid in enumerate(ids)}
+    groups: dict[str, list[int]] = defaultdict(list)
+
     nt: dict[int, str] = {}
     f, _ = open_any(dir_, "connections")
     with f:
@@ -80,13 +109,32 @@ def write_populations(path: Path, dir_: Path, cells: set[int]) -> None:
             rid = int(row["pre_root_id"])
             if rid in index and rid not in nt:
                 nt[rid] = row["nt_type"]
-    groups: dict[str, list[int]] = defaultdict(list)
     for rid, t in nt.items():
         groups[t].append(index[rid])
+
+    try:
+        f, _ = open_any(dir_, "classification")
+    except SystemExit:
+        print("no classification.csv — transmitter groups only, the app keeps its whole-brain readout")
+    else:
+        with f:
+            for row in csv.DictReader(f):
+                i = index.get(int(row["root_id"]))
+                if i is None:
+                    continue
+                side = row["side"] if row["side"] in ("left", "right") else None
+                name = GROUP_OF.get((row["super_class"], row["class"]))
+                if name is None:
+                    continue
+                groups[name].append(i)
+                if side:
+                    groups[f"{name}.{side}"].append(i)
+
     for g in groups.values():
         g.sort()
     path.write_text(json.dumps({k: groups[k] for k in sorted(groups)}, separators=(",", ":")))
-    print("populations: " + " · ".join(f"{k} {len(v)}" for k, v in sorted(groups.items())))
+    print("populations: " + " · ".join(f"{k} {len(v)}" for k, v in sorted(groups.items())
+                                       if "." not in k or k.endswith(".left")))
 
 
 def main(dir_: Path):

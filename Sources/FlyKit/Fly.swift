@@ -38,6 +38,17 @@ public struct Food: Sendable, Equatable {
     }
 }
 
+/// What the app managed to read out of the brain this frame. Two cases rather than one
+/// number with a flag: a synthetic brain has no anatomy to name, and a real one should never
+/// fall back to a whole-brain average by accident.
+public enum BrainSignal: Sendable, Equatable {
+    /// Fraction of all cells firing. Synthetic wiring: there is nothing else to read.
+    case activity(Double, touched: Bool)
+    /// Mean firing rate of the left and right descending populations — the cells that carry
+    /// commands from a fly's brain to its nerve cord.
+    case descending(left: Double, right: Double, touched: Bool)
+}
+
 /// The fly as seen: what it is doing and where it is. One pure step from the brain's
 /// activity to a pose, so "spikes become a fly" is testable without a screen or an engine.
 public struct Fly: Sendable, Equatable {
@@ -45,7 +56,12 @@ public struct Fly: Sendable, Equatable {
     public private(set) var behaviour: Behaviour
     public var vitals: Vitals
     public var readout: BehaviourReadout
+    /// Used when the brain is real; nil is not an option, it is simply unused on synthetic
+    /// wiring, where there are no descending neurons to read.
+    public var descendingReadout = DescendingReadout()
     public var motion: FlyMotion
+    /// The last command read off the descending neurons, for the screen to show.
+    public private(set) var command: MotorCommand = .still
     /// Food on the floor, if any. Reached when within `eatRadius`.
     public private(set) var food: Food?
     public private(set) var isEating = false
@@ -65,9 +81,24 @@ public struct Fly: Sendable, Equatable {
     /// `timeScale` is a fast-forward of everything: needs, and the fly itself. Motion is
     /// sub-stepped so a 64× frame is many small moves, not one jump through a wall.
     public mutating func advance(activity: Double, touched: Bool, dt: Double, timeScale: Double = 1) {
+        advance(.activity(activity, touched: touched), dt: dt, timeScale: timeScale)
+    }
+
+    public mutating func advance(_ signal: BrainSignal, dt: Double, timeScale: Double = 1) {
         let scaled = dt * timeScale
         vitals.advance(dt: scaled)
-        behaviour = readout.behaviour(activity: activity, recentTouch: touched)
+        let touched: Bool
+        switch signal {
+        case .activity(let a, let t):
+            touched = t
+            command = .still
+            behaviour = readout.behaviour(activity: a, recentTouch: t)
+        case .descending(let l, let r, let t):
+            touched = t
+            command = descendingReadout.command(left: l, right: r, dt: scaled, settled: !t)
+            behaviour = descendingReadout.behaviour(command, recentTouch: t)
+        }
+        _ = touched
         isEating = false
         if let f = food, !pose.isAirborne, hypot(f.x - pose.x, f.y - pose.y) <= Self.eatRadius,
            behaviour != .sleep, behaviour != .startle {
@@ -80,10 +111,13 @@ public struct Fly: Sendable, Equatable {
             return
         }
         let goal = food.map { (x: $0.x, y: $0.y) }
+        let steered = command != .still
         var remaining = scaled
         while remaining > 0 {
             let step = min(remaining, Self.motionSubstep)
-            pose = motion.advance(pose, behaviour: behaviour, dt: step, toward: goal)
+            pose = steered
+                ? motion.advance(pose, command: command, behaviour: behaviour, dt: step, toward: goal)
+                : motion.advance(pose, behaviour: behaviour, dt: step, toward: goal)
             remaining -= step
         }
     }

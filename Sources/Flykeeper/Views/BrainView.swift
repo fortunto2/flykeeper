@@ -25,7 +25,7 @@ struct BrainView: View {
     @State private var fellBack = false
     @State private var showAbout = false
     @State private var receipt: SimulationReceipt = .empty
-    @State private var pendingTouch = false
+    @State private var pendingTouch: TouchSide?
     /// Time scale: multiplies the brain's steps per frame and the fly's needs, not the
     /// animation. 64× at eco is ~1000 steps a frame, well inside the budget on a phone.
     @State private var speed = 1
@@ -62,12 +62,11 @@ struct BrainView: View {
             FlyArena3DView(pose: fly.pose, behaviour: fly.behaviour,
                            spikes: frame?.spikes ?? [], neurons: frame?.neurons ?? 0,
                            food: fly.food, positions: positions, rates: frame?.rates ?? [],
-                           lightsOn: fly.vitals.lightsOn)
+                           lightsOn: fly.vitals.lightsOn,
+                           // Where you tap decides which side's bristles fire, and the fly
+                           // turns away through the real wiring, not through a rule of ours.
+                           onTouch: { pendingTouch = $0 })
                 .aspectRatio(0.9, contentMode: .fit)
-                .onTapGesture { pendingTouch = true }
-                .accessibilityAddTraits(.isButton)
-                .accessibilityIdentifier("arena")
-                .accessibilityAction { pendingTouch = true }
 
             VitalsView(vitals: fly.vitals, activity: frame?.activity ?? 0)
 
@@ -164,12 +163,12 @@ struct BrainView: View {
         var count = 0
         var noise: Float = -1
         while !Task.isCancelled {
-            if pendingTouch {
-                pendingTouch = false
+            if let side = pendingTouch {
+                pendingTouch = nil
                 fly.pet()
                 if fly.vitals.isSleeping || !fly.vitals.lightsOn { fly.vitals.apply(.lightsOn) }
-                let at = await engine.touch()
-                log.notice("touch applied at step \(at, privacy: .public)")
+                let at = await engine.touch(side: side)
+                log.notice("touch \(String(describing: side), privacy: .public) at step \(at, privacy: .public)")
             }
             if fly.isEating {
                 // Reward: the fly's dopaminergic cells fire while it eats. On FlyWire these
@@ -190,7 +189,12 @@ struct BrainView: View {
             let dt = min(seconds(last.duration(to: now)), 0.1)
             last = now
             let hadFood = fly.food
-            fly.advance(activity: f.activity, touched: f.touched, dt: dt, timeScale: Double(speed))
+            // A real brain is read off its descending neurons; synthetic wiring has none, so
+            // it keeps the whole-brain average and the app does not pretend otherwise.
+            let signal: BrainSignal = f.descending.map {
+                .descending(left: $0.left, right: $0.right, touched: f.touched)
+            } ?? .activity(f.activity, touched: f.touched)
+            fly.advance(signal, dt: dt, timeScale: Double(speed))
             if hadFood != nil && fly.food == nil {
                 log.notice("morsel gone · fly at \(fly.pose.x, format: .fixed(precision: 2), privacy: .public),\(fly.pose.y, format: .fixed(precision: 2), privacy: .public) · food \(fly.vitals.food, format: .fixed(precision: 2), privacy: .public) · dt \(dt, format: .fixed(precision: 3), privacy: .public)")
             }
@@ -200,7 +204,7 @@ struct BrainView: View {
             // on screen is the exact false statement this receipt exists to prevent.
             if count == 1 || count % receiptEvery == 0 {
                 receipt = f.receipt
-                log.notice("receipt \(f.receipt.summary, privacy: .public) · activity \(f.activity, format: .fixed(precision: 3), privacy: .public) · behaviour \(fly.behaviour.rawValue, privacy: .public) · mood \(fly.vitals.mood.rawValue, privacy: .public) · noise \(noise, format: .fixed(precision: 2), privacy: .public) · speed \(speed, privacy: .public)× · food \(fly.food.map { "\($0.x),\($0.y)" } ?? "none", privacy: .public) · eating \(fly.isEating, privacy: .public) · at \(fly.pose.x, format: .fixed(precision: 2), privacy: .public),\(fly.pose.y, format: .fixed(precision: 2), privacy: .public)")
+                log.notice("receipt \(f.receipt.summary, privacy: .public) · activity \(f.activity, format: .fixed(precision: 3), privacy: .public) · behaviour \(fly.behaviour.rawValue, privacy: .public) · mood \(fly.vitals.mood.rawValue, privacy: .public) · drive \(fly.command.drive, format: .fixed(precision: 2), privacy: .public) · steer \(fly.command.steer, format: .fixed(precision: 2), privacy: .public) · noise \(noise, format: .fixed(precision: 2), privacy: .public) · speed \(speed, privacy: .public)× · food \(fly.food.map { "\($0.x),\($0.y)" } ?? "none", privacy: .public) · eating \(fly.isEating, privacy: .public) · at \(fly.pose.x, format: .fixed(precision: 2), privacy: .public),\(fly.pose.y, format: .fixed(precision: 2), privacy: .public)")
             }
             // Deadline, not "sleep after work", and re-based on overrun: a slow tier drops
             // frames instead of accruing debt, and a resume from background is not 30 s of

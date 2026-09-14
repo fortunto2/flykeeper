@@ -70,8 +70,15 @@ public struct Vitals: Sendable, Equatable, Codable {
 
         /// Synthetic wiring, gain 0.15: 1.0 silent · 3.5 walk · 6.5 turn.
         public static let synthetic = Arousal(asleep: 1.0, awake: 3.5, excited: 3.0)
-        /// FlyWire FAFB v783, gain 0.02: 0.5 silent · 3.5 walk (4.9%) · 8.0 turn (7.0%).
-        public static let flywire = Arousal(asleep: 0.5, awake: 3.5, excited: 4.5)
+        /// FlyWire FAFB v783, gain 0.02: 0.5 silent · 2.2 awake · petted up to 6.7.
+        ///
+        /// Lower than the synthetic brain's on purpose, and measured
+        /// (`examples/descending.rs`): a touch shifts the left/right descending balance by
+        /// 0.021 at background 1.0 and only 0.009 at 3.5. A brain roaring with its own noise
+        /// cannot hear its own bristles, and the whole point of the real wiring is that it
+        /// can. 2.2 keeps a hungry fly (drive falls to 40%) at 1.2, clear of the cliff below
+        /// 1.0 where this graph stops firing at all.
+        public static let flywire = Arousal(asleep: 0.5, awake: 2.2, excited: 4.5)
     }
 
     public var arousal: Arousal = .synthetic

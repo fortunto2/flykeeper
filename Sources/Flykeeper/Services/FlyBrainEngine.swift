@@ -1,6 +1,9 @@
 import Foundation
 import FlyKit
 
+/// Which side of the fly the keeper touched.
+enum TouchSide: Sendable { case left, right, both }
+
 /// One frame's worth of simulation, returned in a single actor hop.
 struct EngineFrame: Sendable {
     let neurons: Int
@@ -13,6 +16,9 @@ struct EngineFrame: Sendable {
     let touched: Bool
     /// Running firing rate per cell (0...1, ~100 ms window), index order: the heat map.
     let rates: [Float]
+    /// Mean firing rate of the left and right descending populations, when the loaded brain
+    /// has them named. Nil on synthetic wiring, which has no anatomy to read.
+    let descending: (left: Double, right: Double)?
     let receipt: SimulationReceipt
 }
 
@@ -88,6 +94,19 @@ actor FlyBrainEngine {
         return ["DA": Array(max(0, neurons - neurons / 20)..<neurons)]
     }()
 
+    /// Index lists resolved once: looking them up in a dictionary every frame, for a value
+    /// that never changes, is the kind of waste that only shows up on the full brain.
+    private lazy var descendingLeft: [Int] = populations["descending.left"] ?? []
+    private lazy var descendingRight: [Int] = populations["descending.right"] ?? []
+
+    /// Mean of `rates` over a set of cells.
+    private func mean(_ cells: [Int], _ rates: [Float]) -> Double {
+        guard !cells.isEmpty else { return 0 }
+        var sum = 0.0
+        for i in cells where i < rates.count { sum += Double(rates[i]) }
+        return sum / Double(cells.count)
+    }
+
     /// Drive a population for as long as the caller keeps calling (re-armed each frame, so
     /// it ends with the behaviour that caused it, not on a timer).
     func drive(population name: String, current: Float, steps: UInt64) {
@@ -112,7 +131,8 @@ actor FlyBrainEngine {
     /// loop to one hop per frame.
     func frame(steps count: Int) -> EngineFrame {
         guard let brain, count > 0 else {
-            return EngineFrame(neurons: 0, activity: 0, spikes: [], touched: false, rates: [], receipt: .empty)
+            return EngineFrame(neurons: 0, activity: 0, spikes: [], touched: false, rates: [],
+                               descending: nil, receipt: .empty)
         }
         var fired: UInt64 = 0
         for _ in 0..<count { fired += UInt64(fly_step(brain)) }
@@ -136,6 +156,8 @@ actor FlyBrainEngine {
             spikes: Array(spikeBuffer.prefix(Int(n))),
             touched: stimulusEndsAt != nil,
             rates: Int(r) == neurons ? rateBuffer : [],
+            descending: descendingLeft.isEmpty || descendingRight.isEmpty || Int(r) != neurons ? nil
+                : (mean(descendingLeft, rateBuffer), mean(descendingRight, rateBuffer)),
             receipt: SimulationReceipt(
                 neurons: Int(fly_neurons(brain)),
                 edges: Int(fly_edges(brain)),
@@ -160,9 +182,18 @@ actor FlyBrainEngine {
         return at
     }
 
-    /// A touch sized for this brain: every tenth neuron.
+    /// A touch, on the side the keeper tapped. On a real brain that is the mechanosensory
+    /// bristles of that side — measured to move the descending balance by about 0.015 in the
+    /// matching direction, which is the whole reason the app can be steered by touch. On
+    /// synthetic wiring there is nothing to aim at, so it falls back to every tenth cell.
     @discardableResult
-    func touch() -> UInt64 { apply(.touch(neurons: neurons)) }
+    func touch(side: TouchSide = .both) -> UInt64 {
+        let named = side == .left ? populations["mechano.left"]
+                  : side == .right ? populations["mechano.right"]
+                  : populations["mechano"]
+        guard let named, !named.isEmpty else { return apply(.touch(neurons: neurons)) }
+        return apply(TouchStimulus(neurons: named, current: 8.0, durationSteps: 250))
+    }
 
     /// Background drive — the fly's state reaching the brain.
     func setNoise(_ noise: Float) {

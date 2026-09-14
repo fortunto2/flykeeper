@@ -18,6 +18,9 @@ struct FlyArena3DView: View {
     /// Running firing rate per cell, for the heat map.
     var rates: [Float] = []
     var lightsOn = true
+    /// Which half of the arena was tapped. The view that owns the space is the one that can
+    /// answer that; passing a width out to the caller only creates a value to get stale.
+    var onTouch: (TouchSide) -> Void = { _ in }
 
     @State private var scene = ArenaScene()
     /// Orbit camera: drag to turn, pinch to zoom. Angles in radians about the cube's centre.
@@ -28,6 +31,14 @@ struct FlyArena3DView: View {
     @State private var pinchStart: Float?
 
     var body: some View {
+        GeometryReader { geo in
+            scene3D
+                .contentShape(Rectangle())
+                .onTapGesture { onTouch($0.x < geo.size.width / 2 ? .left : .right) }
+        }
+    }
+
+    private var scene3D: some View {
         RealityView { content in
             content.add(scene.root)
             // The modelled fly, if the asset loads; the procedural one underneath stays as
@@ -70,6 +81,9 @@ struct FlyArena3DView: View {
         .accessibilityElement()
         .accessibilityLabel("Fly, \(behaviour.rawValue)")
         .accessibilityHint("Touches the fly")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("arena")
+        .accessibilityAction { onTouch(.both) }
     }
 }
 

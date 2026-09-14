@@ -94,12 +94,16 @@ import Testing
     // Measured ladders differ between wirings; the profile carries that, not the fly.
     var v = Vitals()
     v.arousal = .flywire
-    #expect(v.noise == 3.5)
+    #expect(v.noise == 2.2, "fed and rested sits where a touch is still audible")
     v.apply(.lightsOff)
-    #expect(v.noise == 0.5, "0.5 is silence on FlyWire; 1.0 still fires 3% of cells")
+    #expect(v.noise == 0.5, "0.5 is silence on FlyWire; 1.0 already fires 13% of cells")
     v.apply(.lightsOn)
     v.apply(.pet)
-    #expect(v.noise == 8.0, "8.0 is the turn band on FlyWire")
+    #expect(v.noise > 6, "petting excites well above the resting level")
+    // A starving, exhausted fly must still be above the cliff where this graph goes silent.
+    v = Vitals(); v.arousal = .flywire
+    v.food = 0; v.energy = 0.2
+    #expect(v.noise > 1.0, "a neglected fly went silent rather than sluggish: \(v.noise)")
     #expect(SimulationTier.full.arousal == .flywire)
     #expect(SimulationTier.eco.arousal == .synthetic)
 }

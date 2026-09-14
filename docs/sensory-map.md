@@ -41,7 +41,40 @@ Hence two arousal profiles (`Vitals.Arousal`): synthetic 1.0 / 3.5 / +3.0, FlyWi
 0.5 / 3.5 / +4.5. The tier picks the profile; the fly does not know which wiring it has.
 Parallel step (rayon): 1058–1362 steps/s on a 4-P-core Mac at the walk band; realtime is 1000.
 
-## Readout (`FlyKit/Behaviour.swift`)
+## The readout on a real brain (`FlyKit/MotorCommand.swift`)
+
+With the classification export loaded the app stops reading one number for the whole brain
+and reads the **descending neurons** instead — the 1 290 cells that carry commands from a
+fly's brain to its nerve cord, 638 left and 644 right.
+
+| | |
+|---|---|
+| drive | mean descending rate ÷ 0.30, so a resting brain ambles at ~0.46 |
+| steer | left/right asymmetry, resting bias removed, ÷ 0.015 |
+
+Measured on FAFB v783 (`connectome-core/examples/descending.rs`):
+
+| stimulus | asymmetry shift | reaches the body? |
+|---|---|---|
+| nothing (resting bias) | +0.013 … +0.018 | it is a bias, not a command — subtracted |
+| left bristles, 8.0 | −0.021 (noise 1.0) … −0.009 (noise 3.5) | yes |
+| right bristles, 8.0 | +0.017 (noise 1.0) … +0.013 (noise 3.5) | yes |
+| one eye, 6.0 to 60.0, whole or a quarter | 0.000 | **no** |
+| olfactory, 20.0 | +0.003 | barely |
+
+Two things follow. The resting halves are **not** equal: the right descending population sits
+1.3–1.8% above the left with no input at all, so raw asymmetry is not steering and the app
+learns the resting level and subtracts it. And a touch is audible only when the background is
+quiet, which is why the real brain's awake arousal is 2.2 rather than the synthetic 3.5.
+
+**Light does not steer the fly, and the app does not pretend it does.** Driving 5 486
+photoreceptors of one eye at ten times the strength of a touch, whole eye or a patch, moves
+the descending neurons by 0.000. Partly that is four synapses of attenuation; mostly it is
+that a *steady* light is not a steering cue for a fly either, whose visual system reads motion
+and contrast. Two thirds of the cells we simulate are optic (90 459 of 137 518, 48.5% of all
+synapses) and they fire — as scenery, not as eyes, until something gives them a moving image.
+
+## Readout on synthetic wiring (`FlyKit/Behaviour.swift`)
 
 `activity` = mean fraction of neurons firing per step over the last 16-step frame. A frame
 mean, not a single step: one step of a 700-cell population flips the label at frame rate.
@@ -98,6 +131,11 @@ silent and a touch still fires it. Integrated piecewise across sleep/wake crossi
 replayed in one call on launch (`FlyStore`) equals the same day frame by frame.
 
 ## Motion (`FlyKit/FlyMotion.swift`)
+
+Turning under a descending command comes out as **saccades**: a straight run, then a 0.12 s
+flick at 6.5 rad/s, triggered when |steer| passes 0.3. A walking fly's path is runs and flicks,
+not a curve, and a heading that eases round reads as a toy however right the speed is.
+
 
 Unit-square arena, reflecting walls. walk 0.12 arena/s · turn 2.5 rad/s while creeping at
 15% of walk · startle jump 0.9 arena/s with wings beating and legs at 2× gait · groom moves
