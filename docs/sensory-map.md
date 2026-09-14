@@ -139,7 +139,11 @@ towards it while its brain says walk, eats for 8 s within 0.05 of it (`EAT` on s
 a full fly still nibbles the whole morsel. Walking wanders (0.9 rad/s drift keyed on the gait)
 instead of running wall to wall.
 
-Drive: `noise = asleep + (awake − asleep) · (0.4 + 0.6 · min(food, energy)) + excited · excitement`; asleep
+Drive: `noise = asleep + (awake − asleep) · vigour + excited · excitement`, where
+`vigour = 0.35 + 0.5·energy + 0.35·(1 − food)·energy`. **Hunger raises the drive and tiredness
+lowers it**: a hungry animal forages, and the first version of this had it backwards, leaving
+a starving colony sitting beside food it was too "sluggish" to reach. The hunger term is
+scaled by energy, because a fly too tired to move is too tired to search. Asleep
 = 1.0. Fed and rested walks (3.5); starving grooms (2.0); just petted turns (6.5); asleep is
 silent and a touch still fires it. Integrated piecewise across sleep/wake crossings so a day
 replayed in one call on launch (`FlyStore`) equals the same day frame by frame.
@@ -156,6 +160,23 @@ Unit-square arena, reflecting walls. walk 0.12 arena/s · turn 2.5 rad/s while c
 legs only · rest and sleep do not move. Every number is an `init` parameter of `FlyMotion`.
 `Fly` composes vitals, readout and motion into one step; tested in `FlyMotionTests`,
 `FlyTests` and `VitalsTests`.
+
+## A colony (`Services/FlyBrainEngine.swift`)
+
+Every fly runs its own brain over **one shared connectome**: 31 MB of wiring carried once,
+about 2.8 MB of state per fly on the full export. So the ceiling is the processor, not memory.
+
+| tier | flies |
+|---|---|
+| eco (synthetic 700) | 12 |
+| Brain ≥20 | 4 |
+| Full brain | 2 |
+
+Flies that walk within 0.11 arena units — two body widths — touch each other's mechanosensory
+bristles, on the side the other one is on. That is the one sense measured to reach the
+descending neurons, so a colony jostles through the real wiring rather than through a rule of
+ours, and the receipt counts the contacts. Each fly gets its own seed, so the same wiring
+lives a different life in each of them.
 
 ## Tiers (`FlyKit/SimulationTier.swift`)
 

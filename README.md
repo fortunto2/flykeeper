@@ -24,6 +24,14 @@ steps per second, and the words `SYNTHETIC WIRING` whenever the brain is not the
 because a simulation reporting zero spikes and one that never started look identical unless
 the run says which happened.
 
+## A colony
+
+Add flies with **+**. They share one copy of the connectome — 31 MB of wiring carried once,
+2.8 MB of state each — so the limit is the processor, not memory: twelve on the synthetic
+brain, two on the full one. When two walk into each other they feel it on the side they were
+touched, through the same mechanosensory pathway a finger uses, and the receipt counts the
+bumps.
+
 ## The eye
 
 Tap **Eye** and the camera drives the fly's own 10 629 photoreceptors, each at the point on

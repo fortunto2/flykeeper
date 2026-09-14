@@ -118,9 +118,20 @@ public struct Vitals: Sendable, Equatable, Codable {
     /// silent, and a touch still wakes it.
     public var noise: Float {
         guard isAwake else { return arousal.asleep }
-        let vigour = 0.4 + 0.6 * min(food, energy)
         return arousal.asleep + (arousal.awake - arousal.asleep) * Float(vigour)
             + arousal.excited * Float(excitement)
+    }
+
+    /// How hard the brain is being driven, 0…1.2.
+    ///
+    /// **Hunger raises it and tiredness lowers it**, which is the opposite of what this did
+    /// at first. A hungry animal forages: a starved fly walks *more*, not less, and a colony
+    /// that goes still when the food runs out is a colony that never finds any. Exhaustion is
+    /// the thing that makes a fly sluggish, and a fly too tired to move is too tired to
+    /// search either — so the hunger term is scaled by the energy left to act on it.
+    /// Fed and rested is exactly 1, so `awake` means what it says; hunger can push past it.
+    public var vigour: Double {
+        0.35 + 0.65 * energy + 0.4 * (1 - food) * energy
     }
 
     public mutating func apply(_ care: Care) {

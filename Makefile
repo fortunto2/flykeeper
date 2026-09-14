@@ -53,7 +53,7 @@ verify: ## Everything that must be green before a commit: Rust (core + FFI), eng
 # Starting tier for `make run`: eco (default), standard or full.
 TIER ?= eco
 
-run: ## Build, install and launch on the simulator (TIER=full for the real brain, FEED=1 drops food)
+run: ## Build, install and launch on the simulator (TIER=full, FEED=1 drops food, COLONY=n opens with n flies)
 	@test -n "$(SIM_UDID)" || { echo "no simulator named '$(SIM_NAME)' — xcrun simctl list devices"; exit 1; }
 	@xcrun simctl boot $(SIM_UDID) 2>/dev/null || true
 	@open -a Simulator
@@ -62,7 +62,7 @@ run: ## Build, install and launch on the simulator (TIER=full for the real brain
 		test -d "$$app" || { echo "no app bundle at $$app — build settings did not resolve"; exit 1; }; \
 		xcrun simctl install $(SIM_UDID) "$$app"
 	@xcrun simctl terminate $(SIM_UDID) $(BUNDLE) 2>/dev/null || true
-	@SIMCTL_CHILD_FLY_TIER=$(TIER) $(if $(FEED),SIMCTL_CHILD_FLY_FEED=1,) $(if $(LIGHTS),SIMCTL_CHILD_FLY_LIGHTS=$(LIGHTS),) xcrun simctl launch $(SIM_UDID) $(BUNDLE)
+	@SIMCTL_CHILD_FLY_TIER=$(TIER) $(if $(FEED),SIMCTL_CHILD_FLY_FEED=1,) $(if $(LIGHTS),SIMCTL_CHILD_FLY_LIGHTS=$(LIGHTS),) $(if $(COLONY),SIMCTL_CHILD_FLY_COLONY=$(COLONY),) xcrun simctl launch $(SIM_UDID) $(BUNDLE)
 
 device: ## Build, install and launch on the iPhone (needs TEAM in Makefile.local, phone unlocked)
 	@test -n "$(TEAM)" || { echo "TEAM is empty — copy Makefile.local.example to Makefile.local"; exit 1; }

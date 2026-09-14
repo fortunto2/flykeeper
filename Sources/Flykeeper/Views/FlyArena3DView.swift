@@ -7,7 +7,8 @@ import FlyKit
 /// Canvas because the same scene graph becomes augmented reality by switching the camera to
 /// spatial tracking, and a LiDAR mesh of the room drops in as one more entity.
 struct FlyArena3DView: View {
-    let pose: FlyPose
+    /// Every fly in the colony. The first is the one whose brain is on show.
+    let poses: [FlyPose]
     let behaviour: Behaviour
     let spikes: [UInt32]
     let neurons: Int
@@ -51,7 +52,7 @@ struct FlyArena3DView: View {
             }
         } update: { _ in
             scene.setCamera(yaw: yaw, pitch: pitch, distance: distance)
-            scene.apply(pose: pose, behaviour: behaviour, lightsOn: lightsOn)
+            scene.apply(poses: poses, behaviour: behaviour, lightsOn: lightsOn)
             scene.showFood(food)
             scene.showBrain(positions: positions)
             scene.updateRaster(spikes: spikes, neurons: neurons)
@@ -79,7 +80,8 @@ struct FlyArena3DView: View {
                 .onEnded { _ in pinchStart = nil }
         )
         .accessibilityElement()
-        .accessibilityLabel("Fly, \(behaviour.rawValue)")
+        .accessibilityLabel(poses.count > 1 ? "\(poses.count) flies, \(behaviour.rawValue)"
+                                            : "Fly, \(behaviour.rawValue)")
         .accessibilityHint("Touches the fly")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("arena")
@@ -92,6 +94,8 @@ struct FlyArena3DView: View {
 final class ArenaScene {
     let root = Entity()
     private let fly = Entity()
+    /// Clones for colony members 1…n; member 0 is `fly` itself.
+    private var bodies: [Entity] = []
     private let camera = PerspectiveCamera()
     /// Draw order for the two translucent things: shell first, cells on top. Without it
     /// RealityKit re-sorts them by distance every frame and the brain's middle flickers.
@@ -126,7 +130,7 @@ final class ArenaScene {
     private var usingModel = false
 
     /// Cube is 1 unit; the fly is this long. A pet, not a specimen: big enough to read.
-    private static let flySize: Float = 0.2
+    private static let flySize: Float = 0.15
 
     init() {
         // Floor carries the raster texture; walls are edges only, so the fly is visible from
@@ -259,11 +263,44 @@ final class ArenaScene {
         usingModel = true
     }
 
-    func apply(pose: FlyPose, behaviour: Behaviour, lightsOn: Bool) {
+    /// Place every fly in the colony, cloning the model for members added since last frame.
+    /// They share one brain's worth of wiring; on screen they are just more bodies.
+    func apply(poses: [FlyPose], behaviour: Behaviour, lightsOn: Bool) {
+        while bodies.count < poses.count {
+            let clone = fly.clone(recursive: true)
+            // A colony of identical flies reads as a copy-paste; real ones differ in size.
+            clone.scale *= Float.random(in: 0.78...1.15)
+            root.addChild(clone)
+            bodies.append(clone)
+        }
+        while bodies.count > poses.count {
+            bodies.removeLast().removeFromParent()
+        }
+        for (i, p) in poses.enumerated() {
+            place(bodies.isEmpty || i == 0 ? fly : bodies[i - 1], pose: p,
+                  behaviour: i == 0 ? behaviour : .walk, lead: i == 0)
+        }
+        if let m = floor.model?.materials.first as? UnlitMaterial, m.color.texture != nil {
+            var m = m
+            m.color.tint = lightsOn ? .white : UIColor(red: 0.3, green: 0.3, blue: 0.6, alpha: 1)
+            floor.model?.materials = [m]
+        }
+    }
+
+    private func place(_ body: Entity, pose: FlyPose, behaviour: Behaviour, lead: Bool) {
         let s = Self.flySize
-        fly.position = [Float(pose.x - 0.5), Float(pose.z * 0.85) + s * 0.35, Float(pose.y - 0.5)]
-        // 2D heading is x→y; y is the cube's z, so that is a rotation about the up axis by -heading.
-        fly.orientation = simd_quatf(angle: Float(-pose.heading), axis: [0, 1, 0])
+        body.position = [Float(pose.x - 0.5), Float(pose.z * 0.85) + s * 0.35, Float(pose.y - 0.5)]
+        body.orientation = simd_quatf(angle: Float(-pose.heading), axis: [0, 1, 0])
+            // Banking into a turn: a fly leans the way it flicks, and a body that stays level
+            // through a saccade reads as a sprite being dragged.
+            * simd_quatf(angle: Float(pose.saccadeDirection) * (pose.isTurning ? 0.35 : 0),
+                         axis: [1, 0, 0])
+        guard lead else { return }
+        legacyApply(pose: pose, behaviour: behaviour)
+    }
+
+    private func legacyApply(pose: FlyPose, behaviour: Behaviour) {
+        let s = Self.flySize
         // Alternating tripod gait: legs 0,2,4 swing while 1,3,5 stance.
         for (i, leg) in legs.enumerated() {
             let phase = Float(pose.legPhase) + (i % 2 == 0 ? 0 : .pi)
@@ -294,10 +331,6 @@ final class ArenaScene {
         }
         // Tint only modulates the raster texture; on a floor that has none yet it would
         // paint the whole plane white.
-        if var m = floor.model?.materials.first as? UnlitMaterial, m.color.texture != nil {
-            m.color.tint = lightsOn ? .white : UIColor(red: 0.3, green: 0.3, blue: 0.6, alpha: 1)
-            floor.model?.materials = [m]
-        }
     }
 
     /// Lit neurons as a small bitmap on the floor, refreshed every third frame: a texture is

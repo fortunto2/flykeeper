@@ -20,13 +20,22 @@ import Testing
     #expect(v.food == 1)
 }
 
-@Test func aHungryFlyIsSluggishAndTheDialSaysSo() {
-    var v = Vitals()
-    let fed = v.noise
-    v.advance(dt: Vitals.Rates.default.foodLifetime)
-    #expect(v.food == 0)
-    #expect(v.mood == .hungry)
-    #expect(v.noise < fed)
+@Test func aHungryFlyForagesAndATiredOneSlowsDown() {
+    // The first version of this had hunger lower the drive, which left a starving colony
+    // sitting still next to food it was too "sluggish" to walk to. A hungry animal searches;
+    // it is tiredness that slows it.
+    let fed = Vitals().noise
+    // One thing at a time: advancing the clock drains food *and* energy, which is two changes.
+    var hungry = Vitals(); hungry.food = 0
+    #expect(hungry.noise > fed, "a hungry fly should be restless, not sluggish")
+    #expect(hungry.mood == .hungry)
+
+    var tired = Vitals(); tired.energy = 0.15
+    #expect(tired.noise < fed, "an exhausted fly should be slow")
+
+    var spent = Vitals(); spent.food = 0; spent.energy = 0.1
+    #expect(spent.noise < hungry.noise, "too tired to move is too tired to search")
+    #expect(spent.noise < tired.noise || abs(spent.noise - tired.noise) < 0.2)
 }
 
 @Test func lightsOffPutsTheFlyToSleepAndSleepRestoresEnergy() {
@@ -104,6 +113,8 @@ import Testing
     v = Vitals(); v.arousal = .flywire
     v.food = 0; v.energy = 0.2
     #expect(v.noise > 1.0, "a neglected fly went silent rather than sluggish: \(v.noise)")
+    v.energy = 1
+    #expect(v.noise > 2.2, "hunger with energy left should drive a search: \(v.noise)")
     #expect(SimulationTier.full.arousal == .flywire)
     #expect(SimulationTier.eco.arousal == .synthetic)
 }
