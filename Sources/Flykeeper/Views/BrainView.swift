@@ -26,6 +26,13 @@ struct BrainView: View {
     @State private var showAbout = false
     @State private var receipt: SimulationReceipt = .empty
     @State private var pendingTouch: TouchSide?
+    /// The eye: the camera shown to the fly's own photoreceptors. Off by default, and only
+    /// offered on a real brain — synthetic wiring has no retina to look through.
+    @State private var eyeOn = false
+    @State private var eyeFailure: EyeCamera.Failure?
+    @State private var eyeResponse: [Float] = []
+    @State private var retina: Retina?
+    private let camera = EyeCamera()
     /// Time scale: multiplies the brain's steps per frame and the fly's needs, not the
     /// animation. 64× at eco is ~1000 steps a frame, well inside the budget on a phone.
     @State private var speed = 1
@@ -68,6 +75,12 @@ struct BrainView: View {
                            onTouch: { pendingTouch = $0 })
                 .aspectRatio(0.9, contentMode: .fit)
 
+            if eyeOn, let retina, !eyeResponse.isEmpty {
+                EyeView(retina: retina, response: eyeResponse, gain: 14)
+                    .frame(height: 96)
+                    .transition(.opacity)
+            }
+
             VitalsView(vitals: fly.vitals, activity: frame?.activity ?? 0)
 
             // Fast-forward. Segmented, so the speed is one tap and always visible.
@@ -80,6 +93,13 @@ struct BrainView: View {
             HStack(spacing: 12) {
                 Button { feed() } label: { Label("Feed", systemImage: "leaf.fill") }
                     .accessibilityIdentifier("feed")
+                if retina != nil {
+                    Button { eyeOn.toggle() } label: {
+                        Label(eyeOn ? "Eye on" : "Eye", systemImage: eyeOn ? "eye.fill" : "eye")
+                    }
+                    .accessibilityIdentifier("eye")
+                    .tint(eyeOn ? .orange : nil)
+                }
                 Button { care(fly.vitals.lightsOn ? .lightsOff : .lightsOn) } label: {
                     Label(fly.vitals.lightsOn ? "Lights off" : "Lights on",
                           systemImage: fly.vitals.lightsOn ? "moon.fill" : "sun.max.fill")
@@ -97,7 +117,12 @@ struct BrainView: View {
                         .foregroundStyle(.orange)
                 } else if receipt.isSynthetic {
                     Text("Wiring is synthetic — not a fly yet").foregroundStyle(.orange)
-                } else if let credit = tier.attribution {
+                } else if let eyeFailure {
+                Text(eyeFailure == .denied
+                     ? "The eye needs camera access — nothing else in the app does"
+                     : "No camera on this device, so there is nothing to show the fly")
+                    .foregroundStyle(.orange)
+            } else if let credit = tier.attribution {
                     Text(credit).foregroundStyle(.secondary)
                 }
             }
@@ -154,6 +179,8 @@ struct BrainView: View {
         if env["FLY_LIGHTS"] == "off" { fly.vitals.apply(.lightsOff) }
         log.notice("loop start · tier \(engine.tier.rawValue, privacy: .public) · fly at \(fly.pose.x, format: .fixed(precision: 2), privacy: .public),\(fly.pose.y, format: .fixed(precision: 2), privacy: .public)")
         positions = await engine.positions()
+        retina = await engine.retina
+        let sampler = await engine.retina.map(EyeSampler.init)
         // A fallback engine runs synthetic wiring whatever the tier says.
         fellBack = engine.fellBack
         fly.vitals.arousal = engine.fellBack ? .synthetic : tier.arousal
@@ -163,6 +190,11 @@ struct BrainView: View {
         var count = 0
         var noise: Float = -1
         while !Task.isCancelled {
+            // Measured at the top: the eye needs it to adapt before the step it feeds, and a
+            // frame's own duration is not known until after that step has run.
+            let now = clock.now
+            let dt = min(seconds(last.duration(to: now)), 0.1)
+            last = now
             if let side = pendingTouch {
                 pendingTouch = nil
                 fly.pet()
@@ -177,6 +209,29 @@ struct BrainView: View {
                 // the meal.
                 await engine.drive(population: "DA", current: 6.0, steps: UInt64(stepsPerFrame * speed * 3))
             }
+            if eyeOn, let sampler {
+                if !camera.isRunning {
+                    eyeFailure = await camera.start()
+                    if eyeFailure != nil { eyeOn = false }
+                }
+                if camera.isRunning {
+                    let grid = camera.frame()
+                    // Each eye reads its own half of the frame, so a turn sweeps one before
+                    // the other, the way a fly's overlapping fields do.
+                    let r = sampler.look(dt: dt) { u, v, isRight in
+                        let x = (Double(u) * 0.5 + (isRight ? 0.5 : 0)) * Double(EyeCamera.width - 1)
+                        let y = (1 - Double(v)) * Double(EyeCamera.height - 1)
+                        return grid[Int(y) * EyeCamera.width + Int(x)]
+                    }
+                    await engine.look(cells: sampler.cells, currents: r)
+                    eyeResponse = r
+                }
+            } else if camera.isRunning {
+                camera.stop()
+                sampler?.rest()
+                if let sampler { await engine.look(cells: sampler.cells, currents: sampler.response) }
+                eyeResponse = []
+            }
             if fly.vitals.noise != noise {
                 noise = fly.vitals.noise
                 await engine.setNoise(noise)
@@ -185,9 +240,6 @@ struct BrainView: View {
             // The old loop may be here when a tier switch cancels it; its frame must not
             // land on top of the new engine's state.
             if Task.isCancelled { return }
-            let now = clock.now
-            let dt = min(seconds(last.duration(to: now)), 0.1)
-            last = now
             let hadFood = fly.food
             // A real brain is read off its descending neurons; synthetic wiring has none, so
             // it keeps the whole-brain average and the app does not pretend otherwise.
@@ -204,7 +256,7 @@ struct BrainView: View {
             // on screen is the exact false statement this receipt exists to prevent.
             if count == 1 || count % receiptEvery == 0 {
                 receipt = f.receipt
-                log.notice("receipt \(f.receipt.summary, privacy: .public) · activity \(f.activity, format: .fixed(precision: 3), privacy: .public) · behaviour \(fly.behaviour.rawValue, privacy: .public) · mood \(fly.vitals.mood.rawValue, privacy: .public) · drive \(fly.command.drive, format: .fixed(precision: 2), privacy: .public) · steer \(fly.command.steer, format: .fixed(precision: 2), privacy: .public) · noise \(noise, format: .fixed(precision: 2), privacy: .public) · speed \(speed, privacy: .public)× · food \(fly.food.map { "\($0.x),\($0.y)" } ?? "none", privacy: .public) · eating \(fly.isEating, privacy: .public) · at \(fly.pose.x, format: .fixed(precision: 2), privacy: .public),\(fly.pose.y, format: .fixed(precision: 2), privacy: .public)")
+                log.notice("receipt \(f.receipt.summary, privacy: .public) · activity \(f.activity, format: .fixed(precision: 3), privacy: .public) · behaviour \(fly.behaviour.rawValue, privacy: .public) · mood \(fly.vitals.mood.rawValue, privacy: .public) · drive \(fly.command.drive, format: .fixed(precision: 2), privacy: .public) · steer \(fly.command.steer, format: .fixed(precision: 2), privacy: .public) · eye \(eyeOn ? "on" : "off", privacy: .public) · noise \(noise, format: .fixed(precision: 2), privacy: .public) · speed \(speed, privacy: .public)× · food \(fly.food.map { "\($0.x),\($0.y)" } ?? "none", privacy: .public) · eating \(fly.isEating, privacy: .public) · at \(fly.pose.x, format: .fixed(precision: 2), privacy: .public),\(fly.pose.y, format: .fixed(precision: 2), privacy: .public)")
             }
             // Deadline, not "sleep after work", and re-based on overrun: a slow tier drops
             // frames instead of accruing debt, and a resume from background is not 30 s of

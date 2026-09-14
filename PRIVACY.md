@@ -25,8 +25,16 @@ You can check this yourself: the source is at
 
 ## Permissions
 
-None. Flykeeper asks for no camera, no microphone, no photos, no location, no contacts, no
-notifications, no tracking.
+One, and only if you ask for it: the **camera**, for the eye.
+
+Tapping "Eye" shows your fly what the camera sees, through its own photoreceptors. Each frame
+is reduced to a small grid of brightness, sampled into the simulated retina, and dropped. No
+frame is written to disk, kept in memory beyond the next one, shown to anyone, or sent
+anywhere — there is no code in the app that could send it. Turning the eye off stops the
+camera. If you never turn it on, the camera is never started and iOS never asks.
+
+Nothing else: no microphone, no photos, no location, no contacts, no notifications, no
+tracking.
 
 ## Children
 

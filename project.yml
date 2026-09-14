@@ -52,6 +52,10 @@ targets:
       # by scripts/flywire-skeletons.py. See docs/assets.md.
       - path: Resources/fafb-v783-skeletons.fsk
         buildPhase: resources
+      # Where each photoreceptor looks, from scripts/retina.py — the map the camera is shown
+      # to the fly through.
+      - path: Resources/fafb-v783-retina.frt
+        buildPhase: resources
     dependencies:
       - package: FlyKit
         product: FlyKit

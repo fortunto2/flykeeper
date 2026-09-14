@@ -29,7 +29,7 @@ from pathlib import Path
 # Which (super_class, class) pairs become which population. Anything not here is left out:
 # a group the app does not drive or read is weight in the file for nothing.
 GROUP_OF = {
-    ("sensory", "visual"): "visual",              # photoreceptors — the eyes
+    ("sensory", "visual"): "visual",              # the eyes, photoreceptors and ocelli
     ("sensory", "mechanosensory"): "mechano",     # bristles, wind and hearing — touch
     ("sensory", "olfactory"): "olfactory",        # antennal receptors — smell
     ("sensory", "gustatory"): "gustatory",        # taste, on the proboscis and legs
@@ -129,6 +129,21 @@ def write_populations(path: Path, dir_: Path, cells: set[int]) -> None:
                 groups[name].append(i)
                 if side:
                     groups[f"{name}.{side}"].append(i)
+
+    # Photoreceptors alone, without the three simple ocelli, which form no image.
+    try:
+        f, _ = open_any(dir_, "classification")
+    except SystemExit:
+        pass
+    else:
+        with f:
+            for row in csv.DictReader(f):
+                i = index.get(int(row["root_id"]))
+                if i is None or row["sub_class"] != "photo_receptor":
+                    continue
+                groups["photoreceptor"].append(i)
+                if row["side"] in ("left", "right"):
+                    groups[f"photoreceptor.{row['side']}"].append(i)
 
     for g in groups.values():
         g.sort()

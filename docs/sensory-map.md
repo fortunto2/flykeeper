@@ -67,6 +67,20 @@ Two things follow. The resting halves are **not** equal: the right descending po
 learns the resting level and subtracts it. And a touch is audible only when the background is
 quiet, which is why the real brain's awake arousal is 2.2 rather than the synthetic 3.5.
 
+### The eye (`Services/Retina.swift`, `EyeCamera.swift`)
+
+With the eye on, the camera drives the photoreceptors directly: 10 629 of them, each at the
+place on its retina that cell looks from. The map comes from the cells' own positions
+(`scripts/retina.py`): a retina is a curved sheet, and its two dominant directions are its two
+retinal axes, so projecting onto them keeps neighbours as neighbours. That is order, not
+optics — no claim is made about a fly's 270° field or its ommatidial angles.
+
+**Photoreceptors adapt, and ours do too.** A real one responds to change in light rather than
+to its level, which is exactly why a steady light measures 0.000 at the descending neurons.
+Each cell keeps a running mean over 0.35 s and is driven by |luminance − mean| ÷ 0.25, up to
+a current of 14. A static wall therefore produces almost nothing and a moving edge a lot. The
+adaptation is real biology; that time constant and that gain are ours.
+
 **Light does not steer the fly, and the app does not pretend it does.** Driving 5 486
 photoreceptors of one eye at ten times the strength of a touch, whole eye or a patch, moves
 the descending neurons by 0.000. Partly that is four synapses of attenuation; mostly it is

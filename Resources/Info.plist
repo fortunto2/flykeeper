@@ -23,6 +23,10 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<!-- No encryption beyond what the OS provides: declared here so every upload skips the
 	     export-compliance question instead of waiting on it. -->
+	<!-- The eye: camera frames are sampled into the fly's photoreceptors and dropped. Nothing
+	     is recorded, written to disk or sent anywhere; see PRIVACY.md. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Flykeeper can show your fly what the camera sees, through its own eyes. Frames are used only to drive the simulated photoreceptors and are never recorded or sent anywhere.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>UILaunchScreen</key>

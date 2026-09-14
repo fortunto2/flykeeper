@@ -195,6 +195,25 @@ actor FlyBrainEngine {
         return apply(TouchStimulus(neurons: named, current: 8.0, durationSteps: 250))
     }
 
+    /// Where this brain's photoreceptors look, when it has any. Loaded once.
+    lazy var retina: Retina? = {
+        guard case .packed(let resource, _) = tier.source, !fellBack,
+              let url = Bundle.main.url(forResource: "\(resource)-retina", withExtension: "frt")
+        else { return nil }
+        return Retina(url: url)
+    }()
+
+    /// Show the eye a frame: current per photoreceptor, in the order `Retina` lists them.
+    /// Set every frame and never expired — an eye that is open stays open.
+    func look(cells: [UInt32], currents: [Float]) {
+        guard let brain, cells.count == currents.count, !cells.isEmpty else { return }
+        cells.withUnsafeBufferPointer { c in
+            currents.withUnsafeBufferPointer { v in
+                fly_set_stimulus_many(brain, c.baseAddress, v.baseAddress, UInt32(c.count))
+            }
+        }
+    }
+
     /// Background drive — the fly's state reaching the brain.
     func setNoise(_ noise: Float) {
         guard let brain else { return }

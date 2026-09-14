@@ -24,6 +24,14 @@ steps per second, and the words `SYNTHETIC WIRING` whenever the brain is not the
 because a simulation reporting zero spikes and one that never started look identical unless
 the run says which happened.
 
+## The eye
+
+Tap **Eye** and the camera drives the fly's own 10 629 photoreceptors, each at the point on
+its retina that cell looks from — the map comes from the cells' positions in the export, not
+from a texture. Photoreceptors adapt, so a static scene fades and movement lights them up.
+Frames are sampled and dropped: nothing is recorded or sent, and the camera is never started
+until you ask for it.
+
 ## Layout
 
 ```
