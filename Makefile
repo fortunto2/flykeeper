@@ -62,7 +62,7 @@ run: ## Build, install and launch on the simulator (TIER=full for the real brain
 		test -d "$$app" || { echo "no app bundle at $$app — build settings did not resolve"; exit 1; }; \
 		xcrun simctl install $(SIM_UDID) "$$app"
 	@xcrun simctl terminate $(SIM_UDID) $(BUNDLE) 2>/dev/null || true
-	@SIMCTL_CHILD_FLY_TIER=$(TIER) $(if $(FEED),SIMCTL_CHILD_FLY_FEED=1,) xcrun simctl launch $(SIM_UDID) $(BUNDLE)
+	@SIMCTL_CHILD_FLY_TIER=$(TIER) $(if $(FEED),SIMCTL_CHILD_FLY_FEED=1,) $(if $(LIGHTS),SIMCTL_CHILD_FLY_LIGHTS=$(LIGHTS),) xcrun simctl launch $(SIM_UDID) $(BUNDLE)
 
 device: ## Build, install and launch on the iPhone (needs TEAM in Makefile.local, phone unlocked)
 	@test -n "$(TEAM)" || { echo "TEAM is empty — copy Makefile.local.example to Makefile.local"; exit 1; }

@@ -19,6 +19,10 @@ struct BrainView: View {
     @State private var fly = Fly(vitals: FlyStore().load())
     @State private var frame: EngineFrame?
     @State private var positions: [SIMD3<Float>] = []
+    /// The engine fell back to synthetic wiring because a packed tier failed to load. This is
+    /// the only thing that may claim the export is missing — the receipt being synthetic is a
+    /// fact about the brain, not about the load, and on the eco tier it is simply true.
+    @State private var fellBack = false
     @State private var showAbout = false
     @State private var receipt: SimulationReceipt = .empty
     @State private var pendingTouch = false
@@ -89,10 +93,11 @@ struct BrainView: View {
                 Text(receipt.summary)
                 if frame == nil {
                     Text("Loading the brain…").foregroundStyle(.secondary)
-                } else if receipt.isSynthetic {
-                    Text(tier == .eco ? "Wiring is synthetic — not a fly yet"
-                                      : "Brain export missing — running synthetic wiring instead")
+                } else if fellBack {
+                    Text("Brain export missing — running synthetic wiring instead")
                         .foregroundStyle(.orange)
+                } else if receipt.isSynthetic {
+                    Text("Wiring is synthetic — not a fly yet").foregroundStyle(.orange)
                 } else if let credit = tier.attribution {
                     Text(credit).foregroundStyle(.secondary)
                 }
@@ -143,12 +148,15 @@ struct BrainView: View {
         receipt = .empty
         // FLY_FEED=1 drops a morsel at launch: `make run FEED=1`, for screenshots and checks
         // that do not depend on driving a button.
-        if ProcessInfo.processInfo.environment["FLY_FEED"] != nil, fly.food == nil {
+        let env = ProcessInfo.processInfo.environment
+        if env["FLY_FEED"] != nil, fly.food == nil {
             fly.dropFood(at: Food(x: 0.75, y: 0.3))
         }
+        if env["FLY_LIGHTS"] == "off" { fly.vitals.apply(.lightsOff) }
         log.notice("loop start · tier \(engine.tier.rawValue, privacy: .public) · fly at \(fly.pose.x, format: .fixed(precision: 2), privacy: .public),\(fly.pose.y, format: .fixed(precision: 2), privacy: .public)")
         positions = await engine.positions()
         // A fallback engine runs synthetic wiring whatever the tier says.
+        fellBack = engine.fellBack
         fly.vitals.arousal = engine.fellBack ? .synthetic : tier.arousal
         let clock = ContinuousClock()
         var next = clock.now
@@ -188,7 +196,9 @@ struct BrainView: View {
             }
             frame = f
             count += 1
-            if count % receiptEvery == 0 {
+            // The first frame too: a receipt reading "0 neurons" under a brain that is plainly
+            // on screen is the exact false statement this receipt exists to prevent.
+            if count == 1 || count % receiptEvery == 0 {
                 receipt = f.receipt
                 log.notice("receipt \(f.receipt.summary, privacy: .public) · activity \(f.activity, format: .fixed(precision: 3), privacy: .public) · behaviour \(fly.behaviour.rawValue, privacy: .public) · mood \(fly.vitals.mood.rawValue, privacy: .public) · noise \(noise, format: .fixed(precision: 2), privacy: .public) · speed \(speed, privacy: .public)× · food \(fly.food.map { "\($0.x),\($0.y)" } ?? "none", privacy: .public) · eating \(fly.isEating, privacy: .public) · at \(fly.pose.x, format: .fixed(precision: 2), privacy: .public),\(fly.pose.y, format: .fixed(precision: 2), privacy: .public)")
             }
