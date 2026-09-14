@@ -1,0 +1,88 @@
+{
+  "fill": {
+    "linear-gradient": [
+      "display-p3:0.09,0.07,0.17,1",
+      "display-p3:0.02,0.02,0.05,1"
+    ]
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "eyes.svg",
+          "name": "Eyes"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.0
+      },
+      "specular": false,
+      "translucency": {
+        "enabled": false,
+        "value": 0.0
+      }
+    },
+    {
+      "layers": [
+        {
+          "image-name": "glow-core.svg",
+          "name": "Glow core"
+        },
+        {
+          "image-name": "glow-mid.svg",
+          "name": "Glow"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.0
+      },
+      "specular": false,
+      "translucency": {
+        "enabled": false,
+        "value": 0.0
+      }
+    },
+    {
+      "layers": [
+        {
+          "image-name": "body.svg",
+          "name": "Body"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.35
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": false,
+        "value": 0.0
+      }
+    },
+    {
+      "layers": [
+        {
+          "image-name": "wings.svg",
+          "name": "Wings"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.0
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": false,
+        "value": 0.0
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": [
+      "iOS",
+      "macOS"
+    ]
+  }
+}

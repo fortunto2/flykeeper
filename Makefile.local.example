@@ -1,0 +1,3 @@
+# Copy to Makefile.local and fill in. Never commit the real file: a team identifier does not
+# belong in a repository that may go public.
+TEAM := YOURTEAMID

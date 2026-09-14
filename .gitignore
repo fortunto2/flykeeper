@@ -1,0 +1,18 @@
+.build/
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+Makefile.local
+# Generated from project.yml by xcodegen — regenerate with `make generate`.
+Flykeeper.xcodeproj/
+# The engine is built from superduper-dsp by `make engine`, not committed: a 6 MB binary
+# that a one-line script reproduces is not history worth keeping.
+Vendor/FlyBrain.xcframework/
+.DS_Store
+# FlyWire exports from codex.flywire.ai (CC-BY 4.0, hundreds of MB): fetched per machine, never committed.
+data/
+
+# Xcode build logs and the icon preview renders
+build/
+*.xcdistributionlogs
