@@ -87,7 +87,7 @@ def main():
     pops = json.loads((dir_ / "populations.json").read_text())
     z = zipfile.ZipFile(zpath)
     have = {int(Path(n).stem): n for n in z.namelist() if n.endswith(".swc")}
-    chosen = set(i for i in pops.get("DA", []) if ids[i] in have)
+    chosen = {i for i in pops.get("DA", []) if ids[i] in have}
     rest = [i for i in range(len(ids)) if ids[i] in have and i not in chosen]
     random.Random(seed).shuffle(rest)
     chosen |= set(rest[: max(0, want - len(chosen))])

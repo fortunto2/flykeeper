@@ -25,11 +25,12 @@ NCOMP = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4}
 
 def read_glb(path: Path):
     b = path.read_bytes()
-    _, _, _ = struct.unpack("<III", b[:12])
-    jl, jt = struct.unpack("<II", b[12:20])
+    # Header, then the JSON chunk, then the binary chunk. Only the lengths are needed: the
+    # chunk types are fixed by the spec for a .glb with one of each.
+    jl = struct.unpack("<I", b[12:16])[0]
     doc = json.loads(b[20 : 20 + jl])
     off = 20 + jl
-    bl, bt = struct.unpack("<II", b[off : off + 8])
+    bl = struct.unpack("<I", b[off : off + 4])[0]
     return doc, b[off + 8 : off + 8 + bl]
 
 
