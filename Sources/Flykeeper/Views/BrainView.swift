@@ -14,8 +14,14 @@ struct BrainView: View {
     @Environment(\.scenePhase) private var scenePhase
     // FLY_TIER=eco|standard|full picks the starting tier: `make run TIER=full`, and a way to
     // put a screenshot of the full brain on record without driving the picker by hand.
+    //
+    // The real connectome by default. The synthetic brain opens faster, but it makes the app
+    // look like a cartoon fly in a box on the one screen that decides what someone thinks it
+    // is — and the thing that makes this app worth opening is the measured wiring.
     @State private var tier: SimulationTier =
-        SimulationTier(rawValue: ProcessInfo.processInfo.environment["FLY_TIER"] ?? "") ?? .eco
+        SimulationTier(rawValue: ProcessInfo.processInfo.environment["FLY_TIER"] ?? "") ?? .standard
+    /// Shown once, and from About after that. The brain loads behind it.
+    @AppStorage("hasMetTheFly") private var hasMetTheFly = false
     /// The colony. `flies[0]` is the one whose brain is drawn and whose eye the camera feeds;
     /// the rest share its wiring and live their own lives over it.
     @State private var flies = [Fly(vitals: FlyStore().load())]
@@ -155,6 +161,15 @@ struct BrainView: View {
             .multilineTextAlignment(.center)
         }
         .padding()
+        .overlay {
+            if !hasMetTheFly {
+                WelcomeView(stepsPerSecond: receipt.stepsPerSecond) {
+                    withAnimation { hasMetTheFly = true }
+                }
+                    .background(.background)
+                    .transition(.opacity)
+            }
+        }
         .sheet(isPresented: $showAbout) { AboutView() }
         // One trigger, one lifetime: the loop owns its engine, so a tier change cannot leave
         // the loop stepping an engine the view has already replaced.
@@ -302,7 +317,7 @@ struct BrainView: View {
             count += 1
             // The first frame too: a receipt reading "0 neurons" under a brain that is plainly
             // on screen is the exact false statement this receipt exists to prevent.
-            if count == 1 || count % receiptEvery == 0 {
+            if count == 1 || count % (hasMetTheFly ? receiptEvery : 12) == 0 {
                 receipt = f.receipt
                 log.notice("receipt \(f.receipt.summary, privacy: .public) · activity \(f.flies.first?.activity ?? 0, format: .fixed(precision: 3), privacy: .public) · colony \(flies.count, privacy: .public) · bumps \(bumps, privacy: .public) · behaviour \(lead.behaviour.rawValue, privacy: .public) · mood \(lead.vitals.mood.rawValue, privacy: .public) · drive \(lead.command.drive, format: .fixed(precision: 2), privacy: .public) · steer \(lead.command.steer, format: .fixed(precision: 2), privacy: .public) · eye \(eyeOn ? "on" : "off", privacy: .public) · noise \(noise, format: .fixed(precision: 2), privacy: .public) · speed \(speed, privacy: .public)× · food \(lead.food.map { "\($0.x),\($0.y)" } ?? "none", privacy: .public) · eating \(lead.isEating, privacy: .public) · at \(lead.pose.x, format: .fixed(precision: 2), privacy: .public),\(lead.pose.y, format: .fixed(precision: 2), privacy: .public)")
                 bumps = 0
