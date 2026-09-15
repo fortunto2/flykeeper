@@ -1,9 +1,6 @@
 import Foundation
 import FlyKit
 
-/// Which side of the fly the keeper touched.
-enum TouchSide: Sendable { case left, right, both }
-
 /// One fly's brain this frame. The colony shares one connectome — 31 MB of wiring carried
 /// once — and each fly differs only in its state, about 2.8 MB on the full brain.
 struct FlyFrame: Sendable {
@@ -42,6 +39,10 @@ actor FlyBrainEngine {
     /// only ever reached from inside the actor, and only the deinit runs elsewhere.
     private final class Handle: @unchecked Sendable {
         let ptr: OpaquePointer?
+        /// Step at which this fly's stimulus expires; nil when none is applied. On the handle
+        /// rather than in a parallel array, so adding and removing a fly cannot leave the two
+        /// out of step.
+        var endsAt: UInt64?
         init(_ ptr: OpaquePointer?) { self.ptr = ptr }
         deinit { if let ptr { fly_destroy(ptr) } }
     }
@@ -69,8 +70,6 @@ actor FlyBrainEngine {
     private var spikeBuffer: [UInt32]
     private var rateBuffer: [Float]
     private let created = ContinuousClock.now
-    /// Step at which each fly's stimulus expires; nil when none is applied.
-    private var stimulusEndsAt: [UInt64?] = [nil]
     private var lastNoise: Float = 3.5
 
     init(tier: SimulationTier = .eco, seed: UInt64 = 1) {
@@ -116,6 +115,15 @@ actor FlyBrainEngine {
     /// that never changes, is the kind of waste that only shows up on the full brain.
     private lazy var descendingLeft: [Int] = populations["descending.left"] ?? []
     private lazy var descendingRight: [Int] = populations["descending.right"] ?? []
+    /// Mechanosensory cells per side, resolved once for the same reason: `jostle` asks for
+    /// them every frame and the answer never changes.
+    private lazy var bristles: [TouchSide: [UInt32]] = [
+        .left: (populations["mechano.left"] ?? []).map(UInt32.init),
+        .right: (populations["mechano.right"] ?? []).map(UInt32.init),
+        .both: (populations["mechano"] ?? []).map(UInt32.init),
+    ]
+    /// Scratch for bulk stimulus calls, grown once rather than allocated per call.
+    private var currents: [Float] = []
 
     /// Mean of `rates` over a set of cells.
     private func mean(_ cells: [Int], _ rates: [Float]) -> Double {
@@ -151,14 +159,12 @@ actor FlyBrainEngine {
               let ptr = fly_create_shared(brain, seed) else { return false }
         fly_set_noise(ptr, lastNoise)
         handles.append(Handle(ptr))
-        stimulusEndsAt.append(nil)
         return true
     }
 
     func removeFly() {
         guard handles.count > 1 else { return }
         handles.removeLast()
-        stimulusEndsAt.removeLast()
     }
 
     /// Advance by `count` steps and report everything a frame needs. Stepping in a batch
@@ -168,16 +174,20 @@ actor FlyBrainEngine {
         guard let lead = brain, count > 0 else {
             return EngineFrame(neurons: 0, flies: [], spikes: [], rates: [], receipt: .empty)
         }
-        var flies: [FlyFrame] = []
-        flies.reserveCapacity(handles.count)
-        for (f, handle) in handles.enumerated() {
+        var flies = [FlyFrame](repeating: FlyFrame(activity: 0, touched: false, descending: nil),
+                               count: handles.count)
+        // The lead goes last on purpose: its firing rates are what the heat map draws, and
+        // stepping it last leaves them in `rateBuffer` already. Copying 138 584 floats a
+        // second time was 554 KB a frame for nothing.
+        for f in handles.indices.reversed() {
+            let handle = handles[f]
             guard let b = handle.ptr else { continue }
             var fired: UInt64 = 0
             for _ in 0..<count { fired += UInt64(fly_step(b)) }
             let steps = fly_steps(b)
-            if let end = stimulusEndsAt[f], steps >= end {
+            if let end = handle.endsAt, steps >= end {
                 fly_clear_stimulus(b)
-                stimulusEndsAt[f] = nil
+                handle.endsAt = nil
             }
             var descending: (left: Double, right: Double)?
             if !descendingLeft.isEmpty && !descendingRight.isEmpty {
@@ -188,18 +198,22 @@ actor FlyBrainEngine {
                     descending = (mean(descendingLeft, rateBuffer), mean(descendingRight, rateBuffer))
                 }
             }
-            flies.append(FlyFrame(activity: Double(fired) / Double(count * max(neurons, 1)),
-                                  touched: stimulusEndsAt[f] != nil,
-                                  descending: descending))
+            flies[f] = FlyFrame(activity: Double(fired) / Double(count * max(neurons, 1)),
+                                touched: handle.endsAt != nil,
+                                descending: descending)
         }
 
-        // Spikes and rates come from the fly on show; `rateBuffer` already holds the last
-        // fly's rates from the loop above, so it is refilled from the lead deliberately.
         let n = spikeBuffer.withUnsafeMutableBufferPointer { buf in
             fly_copy_spikes(lead, buf.baseAddress, UInt32(buf.count))
         }
-        let r = rateBuffer.withUnsafeMutableBufferPointer { buf in
-            fly_copy_rates(lead, buf.baseAddress, UInt32(buf.count))
+        // Only refill when the loop above never did — a brain with no named descending
+        // population copies no rates at all.
+        var rates = rateBuffer
+        if descendingLeft.isEmpty || descendingRight.isEmpty {
+            let r = rateBuffer.withUnsafeMutableBufferPointer { buf in
+                fly_copy_rates(lead, buf.baseAddress, UInt32(buf.count))
+            }
+            rates = Int(r) == neurons ? rateBuffer : []
         }
         let elapsed = created.duration(to: .now)
         let seconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) * 1e-18
@@ -208,7 +222,7 @@ actor FlyBrainEngine {
             neurons: neurons,
             flies: flies,
             spikes: Array(spikeBuffer.prefix(Int(n))),
-            rates: Int(r) == neurons ? rateBuffer : [],
+            rates: rates,
             receipt: SimulationReceipt(
                 neurons: Int(fly_neurons(lead)),
                 edges: Int(fly_edges(lead)),
@@ -224,17 +238,25 @@ actor FlyBrainEngine {
     /// gets the same touch as a fast one. Returns the step it was applied at, for the log.
     @discardableResult
     func apply(_ stimulus: TouchStimulus, fly: Int = 0) -> UInt64 {
-        guard let b = handles[safe: fly]?.ptr else { return 0 }
-        var ids = stimulus.neurons.map(UInt32.init)
-        var values = [Float](repeating: stimulus.current, count: ids.count)
-        ids.withUnsafeBufferPointer { i in
-            values.withUnsafeMutableBufferPointer { v in
-                fly_set_stimulus_many(b, i.baseAddress, v.baseAddress, UInt32(i.count))
+        guard let handle = handles[safe: fly], let b = handle.ptr else { return 0 }
+        drive(cells: stimulus.neurons.map(UInt32.init), current: stimulus.current, on: b)
+        let at = fly_steps(b)
+        handle.endsAt = at + stimulus.durationSteps
+        return at
+    }
+
+    /// Current onto a set of cells, reusing one scratch buffer. `jostle` can call this a
+    /// dozen times a frame with 1 358 cells each; allocating two arrays per call was 24 heap
+    /// allocations a frame on a full colony.
+    private func drive(cells: [UInt32], current: Float, on brain: OpaquePointer) {
+        guard !cells.isEmpty else { return }
+        if currents.count < cells.count { currents = [Float](repeating: 0, count: cells.count) }
+        for i in 0..<cells.count { currents[i] = current }
+        cells.withUnsafeBufferPointer { c in
+            currents.withUnsafeMutableBufferPointer { v in
+                fly_set_stimulus_many(brain, c.baseAddress, v.baseAddress, UInt32(c.count))
             }
         }
-        let at = fly_steps(b)
-        stimulusEndsAt[fly] = at + stimulus.durationSteps
-        return at
     }
 
     /// A touch, on the side the keeper tapped. On a real brain that is the mechanosensory
@@ -243,11 +265,19 @@ actor FlyBrainEngine {
     /// synthetic wiring there is nothing to aim at, so it falls back to every tenth cell.
     @discardableResult
     func touch(side: TouchSide = .both, fly: Int = 0) -> UInt64 {
-        let named = side == .left ? populations["mechano.left"]
-                  : side == .right ? populations["mechano.right"]
-                  : populations["mechano"]
-        guard let named, !named.isEmpty else { return apply(.touch(neurons: neurons), fly: fly) }
-        return apply(TouchStimulus(neurons: named, current: 8.0, durationSteps: 250), fly: fly)
+        guard let handle = handles[safe: fly], let b = handle.ptr else { return 0 }
+        let named = bristles[side] ?? []
+        guard !named.isEmpty else { return apply(.touch(neurons: neurons), fly: fly) }
+        drive(cells: named, current: TouchStimulus.touchCurrent, on: b)
+        let at = fly_steps(b)
+        handle.endsAt = at + TouchStimulus.touchSteps
+        return at
+    }
+
+    /// Every contact of one frame in a single hop. `jostle` used to await twice per touching
+    /// pair inside its inner loop: up to 132 round trips a frame on a full colony.
+    func touch(_ contacts: [Contact]) {
+        for c in contacts { touch(side: c.side, fly: c.fly) }
     }
 
     /// Where this brain's photoreceptors look, when it has any. Loaded once.

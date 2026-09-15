@@ -7,14 +7,15 @@ import FlyKit
 /// Canvas because the same scene graph becomes augmented reality by switching the camera to
 /// spatial tracking, and a LiDAR mesh of the room drops in as one more entity.
 struct FlyArena3DView: View {
-    /// Every fly in the colony. The first is the one whose brain is on show.
-    let poses: [FlyPose]
-    let behaviour: Behaviour
+    /// Every fly in the colony, each with what it is doing. The first is the one whose brain
+    /// is on show.
+    let flies: [(pose: FlyPose, behaviour: Behaviour)]
     let spikes: [UInt32]
     let neurons: Int
     /// A morsel on the floor, in arena coordinates.
     var food: Food?
-    /// Cell positions in µm for a real brain; empty for synthetic wiring.
+    /// Cell positions in µm for a real brain; empty for synthetic wiring. Copied into the
+    /// point cloud's vertex buffer when it is built and not read per frame after that.
     var positions: [SIMD3<Float>] = []
     /// Running firing rate per cell, for the heat map.
     var rates: [Float] = []
@@ -52,7 +53,7 @@ struct FlyArena3DView: View {
             }
         } update: { _ in
             scene.setCamera(yaw: yaw, pitch: pitch, distance: distance)
-            scene.apply(poses: poses, behaviour: behaviour, lightsOn: lightsOn)
+            scene.apply(flies: flies, lightsOn: lightsOn)
             scene.showFood(food)
             scene.showBrain(positions: positions)
             scene.updateRaster(spikes: spikes, neurons: neurons)
@@ -80,8 +81,9 @@ struct FlyArena3DView: View {
                 .onEnded { _ in pinchStart = nil }
         )
         .accessibilityElement()
-        .accessibilityLabel(poses.count > 1 ? "\(poses.count) flies, \(behaviour.rawValue)"
-                                            : "Fly, \(behaviour.rawValue)")
+        .accessibilityLabel(flies.count > 1
+            ? "\(flies.count) flies, \(flies[0].behaviour.rawValue)"
+            : "Fly, \(flies.first?.behaviour.rawValue ?? "resting")")
         .accessibilityHint("Touches the fly")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("arena")
@@ -94,8 +96,10 @@ struct FlyArena3DView: View {
 final class ArenaScene {
     let root = Entity()
     private let fly = Entity()
-    /// Clones for colony members 1…n; member 0 is `fly` itself.
-    private var bodies: [Entity] = []
+    /// One entity per fly; the first is `fly` itself. Indexed the same as the poses, because
+    /// an array offset by one silently left the last clone unplaced, frozen wherever it was
+    /// cloned from.
+    private lazy var bodies: [Entity] = [fly]
     private let camera = PerspectiveCamera()
     /// Draw order for the two translucent things: shell first, cells on top. Without it
     /// RealityKit re-sorts them by distance every frame and the brain's middle flickers.
@@ -124,6 +128,10 @@ final class ArenaScene {
     private(set) var cloud: BrainCloud?
     private(set) var wires: BrainWires?
     private var cloudCells = -1
+    private var lastLightsOn = true
+    /// The eye colour actually on the model, so a material is not rebuilt 180 times a second
+    /// for a value that changes when the fly falls asleep.
+    private var lastEyeColor: UIColor?
     /// The loaded model's parts, when `adopt` succeeded; nil means the procedural fly.
     private var modelWings: [ModelEntity] = []
     private var modelEyes: ModelEntity?
@@ -265,29 +273,35 @@ final class ArenaScene {
 
     /// Place every fly in the colony, cloning the model for members added since last frame.
     /// They share one brain's worth of wiring; on screen they are just more bodies.
-    func apply(poses: [FlyPose], behaviour: Behaviour, lightsOn: Bool) {
-        while bodies.count < poses.count {
+    func apply(flies: [(pose: FlyPose, behaviour: Behaviour)], lightsOn: Bool) {
+        while bodies.count < flies.count {
             let clone = fly.clone(recursive: true)
             // A colony of identical flies reads as a copy-paste; real ones differ in size.
             clone.scale *= Float.random(in: 0.78...1.15)
             root.addChild(clone)
             bodies.append(clone)
         }
-        while bodies.count > poses.count {
+        while bodies.count > max(flies.count, 1) {
             bodies.removeLast().removeFromParent()
         }
-        for (i, p) in poses.enumerated() {
-            place(bodies.isEmpty || i == 0 ? fly : bodies[i - 1], pose: p,
-                  behaviour: i == 0 ? behaviour : .walk, lead: i == 0)
+        for (i, f) in flies.enumerated() where i < bodies.count {
+            place(bodies[i], pose: f.pose)
+            // Limbs, wings and eyes for the lead only: the clones carry the model's own
+            // geometry and animating eleven copies of it is eleven times the transform work
+            // for bodies a few points across.
+            if i == 0 { animate(pose: f.pose, behaviour: f.behaviour) }
         }
-        if let m = floor.model?.materials.first as? UnlitMaterial, m.color.texture != nil {
-            var m = m
+        // Tint only modulates the raster texture; on a floor that has none yet it would
+        // paint the whole plane white.
+        if lightsOn != lastLightsOn, var m = floor.model?.materials.first as? UnlitMaterial,
+           m.color.texture != nil {
+            lastLightsOn = lightsOn
             m.color.tint = lightsOn ? .white : UIColor(red: 0.3, green: 0.3, blue: 0.6, alpha: 1)
             floor.model?.materials = [m]
         }
     }
 
-    private func place(_ body: Entity, pose: FlyPose, behaviour: Behaviour, lead: Bool) {
+    private func place(_ body: Entity, pose: FlyPose) {
         let s = Self.flySize
         body.position = [Float(pose.x - 0.5), Float(pose.z * 0.85) + s * 0.35, Float(pose.y - 0.5)]
         body.orientation = simd_quatf(angle: Float(-pose.heading), axis: [0, 1, 0])
@@ -295,11 +309,10 @@ final class ArenaScene {
             // through a saccade reads as a sprite being dragged.
             * simd_quatf(angle: Float(pose.saccadeDirection) * (pose.isTurning ? 0.35 : 0),
                          axis: [1, 0, 0])
-        guard lead else { return }
-        legacyApply(pose: pose, behaviour: behaviour)
     }
 
-    private func legacyApply(pose: FlyPose, behaviour: Behaviour) {
+    /// Limbs, wings and eyes of the fly on show.
+    private func animate(pose: FlyPose, behaviour: Behaviour) {
         let s = Self.flySize
         // Alternating tripod gait: legs 0,2,4 swing while 1,3,5 stance.
         for (i, leg) in legs.enumerated() {
@@ -316,7 +329,12 @@ final class ArenaScene {
                 * simd_quatf(angle: flutter * side, axis: [1, 0, 0])
         }
         let eyeColor: UIColor = behaviour == .sleep ? .darkGray : .red
-        for eye in eyes { eye.model?.materials = [SimpleMaterial(color: eyeColor, roughness: 0.3, isMetallic: false)] }
+        if eyeColor != lastEyeColor {
+            lastEyeColor = eyeColor
+            let material = SimpleMaterial(color: eyeColor, roughness: 0.3, isMetallic: false)
+            for eye in eyes { eye.model?.materials = [material] }
+            modelEyes?.model?.materials = [material]
+        }
         if usingModel {
             // The model's wings pivot at their roots (baked by the converter): flap about the
             // body's long axis, mirrored, and lift a little more while beating.
@@ -324,13 +342,10 @@ final class ArenaScene {
                 let side: Float = i == 0 ? 1 : -1
                 wing.orientation = simd_quatf(angle: side * (flutter + Float(pose.wingBeat) * 0.3), axis: [1, 0, 0])
             }
-            modelEyes?.model?.materials = [SimpleMaterial(color: eyeColor, roughness: 0.3, isMetallic: false)]
             // A walking fly bobs; a sleeping one sits lower.
             let bob = pose.isAirborne ? 0 : Float(sin(pose.legPhase)) * s * 0.03
             fly.position.y += bob - (behaviour == .sleep ? s * 0.05 : 0)
         }
-        // Tint only modulates the raster texture; on a floor that has none yet it would
-        // paint the whole plane white.
     }
 
     /// Lit neurons as a small bitmap on the floor, refreshed every third frame: a texture is

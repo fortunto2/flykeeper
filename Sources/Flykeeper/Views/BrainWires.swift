@@ -23,27 +23,20 @@ final class BrainWires {
 
     /// `url`: the .fsk file. Positions are mapped with the cloud's µm → scene transform.
     init?(url: URL, mid: SIMD3<Float>, scale: Float, centre: SIMD3<Float>) {
-        guard let data = try? Data(contentsOf: url), data.count > 8, data.prefix(4) == Data("FSK1".utf8),
-              let device = MTLCreateSystemDefaultDevice(), let library = device.makeDefaultLibrary() else { return nil }
+        guard let reader = PackedReader(url: url, magic: "FSK1"),
+              let neurons = reader.u32(),
+              let device = MTLCreateSystemDefaultDevice(),
+              let library = device.makeDefaultLibrary() else { return nil }
         var positions: [SIMD3<Float>] = []
         var cells: [Int32] = []
-        data.withUnsafeBytes { raw in
-            var o = 4
-            func u32() -> UInt32 { defer { o += 4 }; return raw.loadUnaligned(fromByteOffset: o, as: UInt32.self) }
-            func f32() -> Float { defer { o += 4 }; return raw.loadUnaligned(fromByteOffset: o, as: Float.self) }
-            let neurons = Int(u32())
-            positions.reserveCapacity(neurons * 100)
-            for _ in 0..<neurons {
-                let cell = Int32(u32())
-                let segments = Int(u32())
-                for _ in 0..<segments {
-                    for _ in 0..<2 {
-                        let p = SIMD3(f32(), f32(), f32())
-                        let q = (p - mid) * scale
-                        positions.append(centre + SIMD3(q.x, -q.y, q.z))
-                        cells.append(cell)
-                    }
-                }
+        positions.reserveCapacity(Int(neurons) * 100)
+        for _ in 0..<neurons {
+            guard let cell = reader.u32(), let segments = reader.u32() else { return nil }
+            for _ in 0..<(segments * 2) {
+                guard let x = reader.f32(), let y = reader.f32(), let z = reader.f32() else { return nil }
+                let q = (SIMD3(x, y, z) - mid) * scale
+                positions.append(centre + SIMD3(q.x, -q.y, q.z))
+                cells.append(Int32(cell))
             }
         }
         guard !positions.isEmpty else { return nil }

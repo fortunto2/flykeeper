@@ -15,6 +15,9 @@ public struct MotorCommand: Sendable, Equatable {
     }
 
     public static let still = MotorCommand(drive: 0, steer: 0)
+    /// A brain pushing as hard as it can, going straight. What a behaviour on its own means
+    /// when nothing has said how hard.
+    public static let full = MotorCommand(drive: 1, steer: 0)
 }
 
 /// Turns left and right descending firing rates into a motor command.
@@ -71,17 +74,21 @@ public struct DescendingReadout: Sendable, Equatable {
                             steer: ((asym - restAsymmetry!) / steerScale).clamped(to: -1...1))
     }
 
-    /// What the fly does, from the command it is actually being given.
+    /// What the fly does, from the command it is actually being given. Named thresholds for
+    /// the same reason `BehaviourReadout` has them: a ladder of bare literals cannot be
+    /// tuned, tested against a different export, or told apart from a typo.
+    public var sleepDrive: Double = 0.03
+    public var groomDrive: Double = 0.12
+    public var walkDrive: Double = 0.35
+    public var startleDrive: Double = 0.5
+    public var turnSteer: Double = 0.45
+
     public func behaviour(_ c: MotorCommand, recentTouch: Bool) -> Behaviour {
-        if c.drive <= 0.03 { return .sleep }
-        if recentTouch && c.drive >= 0.5 { return .startle }
-        if abs(c.steer) >= 0.45 { return .turn }
-        if c.drive >= 0.35 { return .walk }
-        if c.drive >= 0.12 { return .groom }
+        if c.drive <= sleepDrive { return .sleep }
+        if recentTouch && c.drive >= startleDrive { return .startle }
+        if abs(c.steer) >= turnSteer { return .turn }
+        if c.drive >= walkDrive { return .walk }
+        if c.drive >= groomDrive { return .groom }
         return .rest
     }
-}
-
-extension Comparable {
-    func clamped(to r: ClosedRange<Self>) -> Self { min(max(self, r.lowerBound), r.upperBound) }
 }

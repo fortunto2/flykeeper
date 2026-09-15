@@ -19,9 +19,14 @@ public struct TouchStimulus: Sendable, Equatable {
     /// `connectome-core/examples/touch_sweep.rs` to read ~0.09 through a frame mean on
     /// 700, 6 000 and 139 255 neurons, awake or asleep. On synthetic wiring the indices
     /// mean nothing; on the real export they must map to mechanosensory afferents.
+    /// What a touch is, in one place: the app drives named bristles by index and cannot
+    /// reach `touch(neurons:)`, so without these it re-typed the two constants.
+    public static let touchCurrent: Float = 8.0
+    public static let touchSteps: UInt64 = 250
+
     public static func touch(neurons: Int) -> TouchStimulus {
         TouchStimulus(neurons: Array(stride(from: 0, to: max(neurons, 0), by: 10)),
-                      current: 8.0, durationSteps: 250)
+                      current: touchCurrent, durationSteps: touchSteps)
     }
 }
 
@@ -87,18 +92,14 @@ public struct Fly: Sendable, Equatable {
     public mutating func advance(_ signal: BrainSignal, dt: Double, timeScale: Double = 1) {
         let scaled = dt * timeScale
         vitals.advance(dt: scaled)
-        let touched: Bool
         switch signal {
         case .activity(let a, let t):
-            touched = t
-            command = .still
+            command = readout.command(activity: a)
             behaviour = readout.behaviour(activity: a, recentTouch: t)
         case .descending(let l, let r, let t):
-            touched = t
             command = descendingReadout.command(left: l, right: r, dt: scaled, settled: !t)
             behaviour = descendingReadout.behaviour(command, recentTouch: t)
         }
-        _ = touched
         isEating = false
         if let f = food, !pose.isAirborne, hypot(f.x - pose.x, f.y - pose.y) <= Self.eatRadius,
            behaviour != .sleep, behaviour != .startle {
@@ -111,13 +112,10 @@ public struct Fly: Sendable, Equatable {
             return
         }
         let goal = food.map { (x: $0.x, y: $0.y) }
-        let steered = command != .still
         var remaining = scaled
         while remaining > 0 {
             let step = min(remaining, Self.motionSubstep)
-            pose = steered
-                ? motion.advance(pose, command: command, behaviour: behaviour, dt: step, toward: goal)
-                : motion.advance(pose, behaviour: behaviour, dt: step, toward: goal)
+            pose = motion.advance(pose, command: command, behaviour: behaviour, dt: step, toward: goal)
             remaining -= step
         }
     }

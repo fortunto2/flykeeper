@@ -20,11 +20,12 @@ Licence of the source data: CC-BY 4.0, Dorkenwald et al. 2024 and Schlegel et al
 (Nature). Cite them wherever the app shows the real brain.
 """
 import csv
-import gzip
 import sys
 from collections import defaultdict
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent))
+from flywire_io import open_any
 
 # Which (super_class, class) pairs become which population. Anything not here is left out:
 # a group the app does not drive or read is weight in the file for nothing.
@@ -40,12 +41,18 @@ GROUP_OF = {
 }
 
 
-def open_any(dir_: Path, stem: str):
-    for name in (f"{stem}.csv.gz", f"{stem}.csv"):
-        p = dir_ / name
-        if p.exists():
-            return (gzip.open(p, "rt") if name.endswith(".gz") else p.open()), p
-    sys.exit(f"missing {stem}.csv(.gz) in {dir_}")
+# Which (super_class, class) pairs become which population. Anything not here is left out:
+# a group the app does not drive or read is weight in the file for nothing.
+GROUP_OF = {
+    ("sensory", "visual"): "visual",              # the eyes, photoreceptors and ocelli
+    ("sensory", "mechanosensory"): "mechano",     # bristles, wind and hearing — touch
+    ("sensory", "olfactory"): "olfactory",        # antennal receptors — smell
+    ("sensory", "gustatory"): "gustatory",        # taste, on the proboscis and legs
+    ("descending", ""): "descending",             # brain → nerve cord: the motor command
+    ("descending", "ocellar"): "descending",
+    ("motor", "brain_motor_neuron"): "motor",     # proboscis and neck muscles
+    ("visual_projection", ""): "visual_projection",
+}
 
 
 def write_fcb(path: Path, edges: dict[tuple[int, int], int], sums: dict[int, list[float]]) -> None:
@@ -112,9 +119,8 @@ def write_populations(path: Path, dir_: Path, cells: set[int]) -> None:
     for rid, t in nt.items():
         groups[t].append(index[rid])
 
-    try:
-        f, _ = open_any(dir_, "classification")
-    except SystemExit:
+    f, _ = open_any(dir_, "classification", required=False)
+    if f is None:
         print("no classification.csv — transmitter groups only, the app keeps its whole-brain readout")
     else:
         with f:
@@ -123,27 +129,17 @@ def write_populations(path: Path, dir_: Path, cells: set[int]) -> None:
                 if i is None:
                     continue
                 side = row["side"] if row["side"] in ("left", "right") else None
+                # Photoreceptors alone, without the three simple ocelli, which form no image.
+                if row["sub_class"] == "photo_receptor":
+                    groups["photoreceptor"].append(i)
+                    if side:
+                        groups[f"photoreceptor.{side}"].append(i)
                 name = GROUP_OF.get((row["super_class"], row["class"]))
                 if name is None:
                     continue
                 groups[name].append(i)
                 if side:
                     groups[f"{name}.{side}"].append(i)
-
-    # Photoreceptors alone, without the three simple ocelli, which form no image.
-    try:
-        f, _ = open_any(dir_, "classification")
-    except SystemExit:
-        pass
-    else:
-        with f:
-            for row in csv.DictReader(f):
-                i = index.get(int(row["root_id"]))
-                if i is None or row["sub_class"] != "photo_receptor":
-                    continue
-                groups["photoreceptor"].append(i)
-                if row["side"] in ("left", "right"):
-                    groups[f"photoreceptor.{row['side']}"].append(i)
 
     for g in groups.values():
         g.sort()

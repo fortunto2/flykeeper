@@ -52,6 +52,13 @@ fly's brain to its nerve cord, 638 left and 644 right.
 | drive | mean descending rate ÷ 0.30, so a resting brain ambles at ~0.46 |
 | steer | left/right asymmetry, resting bias removed, ÷ 0.015 |
 
+Synthetic wiring has no sides to compare, so its readout says how hard (activity ÷ 0.07) and
+never which way. Both produce the same `MotorCommand`, so which readout made it is settled
+where it is built and travels no further.
+
+Behaviour from the command: sleep ≤ 0.03 drive · startle at ≥ 0.5 with a touch · turn at
+|steer| ≥ 0.45 · walk ≥ 0.35 · groom ≥ 0.12 · rest otherwise.
+
 Measured on FAFB v783 (`connectome-core/examples/descending.rs`):
 
 | stimulus | asymmetry shift | reaches the body? |
@@ -79,7 +86,12 @@ optics — no claim is made about a fly's 270° field or its ommatidial angles.
 to its level, which is exactly why a steady light measures 0.000 at the descending neurons.
 Each cell keeps a running mean over 0.35 s and is driven by |luminance − mean| ÷ 0.25, up to
 a current of 14. A static wall therefore produces almost nothing and a moving edge a lot. The
-adaptation is real biology; that time constant and that gain are ours.
+adaptation is real biology; that time constant and that gain are ours. It lives in
+`FlyKit/Photoreceptors.swift` with the other assumptions, and is tested there.
+
+The camera frame is reduced to **64 × 48** before sampling. A fly has about 700 ommatidia an
+eye, so anything finer is thrown away by the retinal map anyway; each eye reads its own half
+of the frame, so turning the phone sweeps one before the other.
 
 **Light does not steer the fly, and the app does not pretend it does.** Driving 5 486
 photoreceptors of one eye at ten times the strength of a touch, whole eye or a patch, moves
@@ -140,7 +152,8 @@ a full fly still nibbles the whole morsel. Walking wanders (0.9 rad/s drift keye
 instead of running wall to wall.
 
 Drive: `noise = asleep + (awake − asleep) · vigour + excited · excitement`, where
-`vigour = 0.35 + 0.5·energy + 0.35·(1 − food)·energy`. **Hunger raises the drive and tiredness
+`vigour = 0.35 + 0.65·energy + 0.4·(1 − food)·energy`, which is exactly 1 for a fed and
+rested fly. **Hunger raises the drive and tiredness
 lowers it**: a hungry animal forages, and the first version of this had it backwards, leaving
 a starving colony sitting beside food it was too "sluggish" to reach. The hunger term is
 scaled by energy, because a fly too tired to move is too tired to search. Asleep
@@ -172,8 +185,14 @@ about 2.8 MB of state per fly on the full export. So the ceiling is the processo
 | Brain ≥20 | 4 |
 | Full brain | 2 |
 
-Flies that walk within 0.11 arena units — two body widths — touch each other's mechanosensory
-bristles, on the side the other one is on. That is the one sense measured to reach the
+Flies whose centres come within **0.11 arena units** touch each other's mechanosensory
+bristles, on the side the other one is on. The model is 0.15 units long, so they overlap
+visibly before it fires; what matters is that this is a body width and *not* the 0.05 eating
+reach, which is what it was at first — two flies could stand touching and feel nothing.
+Flies more than 0.1 apart in height miss each other: one in the air is not bumping into one
+on the floor. A new fly is put at the emptiest of 8 random spots in the middle 76% of the
+arena, so a colony spreads instead of piling up, and starts between half and fully fed.
+The rules are `FlyKit/Colony.swift`, tested in `ColonyTests`. That is the one sense measured to reach the
 descending neurons, so a colony jostles through the real wiring rather than through a rule of
 ours, and the receipt counts the contacts. Each fly gets its own seed, so the same wiring
 lives a different life in each of them.

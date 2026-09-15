@@ -32,10 +32,13 @@ struct BrainView: View {
     /// offered on a real brain — synthetic wiring has no retina to look through.
     @State private var eyeOn = false
     @State private var eyeFailure: EyeCamera.Failure?
-    @State private var eyeResponse: [Float] = []
-    @State private var retina: Retina?
+    /// Built once the brain is loaded; nil on synthetic wiring, which has no retina.
+    @State private var sampler: EyeSampler?
     @State private var engine0: FlyBrainEngine?
     @State private var colonyLimit = 1
+    /// The fly on show: its brain is drawn, its eye is fed, its vitals are the bars.
+    private var lead: Fly { flies[0] }
+
     /// Contacts since the last receipt, so a colony's jostling is a number on the record
     /// rather than something you have to watch for.
     @State private var bumps = 0
@@ -51,14 +54,12 @@ struct BrainView: View {
     private let framePeriod: Duration = .milliseconds(16)
     /// Receipt on screen and in the log once a second; per-frame it only churns layout.
     private let receiptEvery = 60
-    /// Two fly bodies wide, in arena units. The model is 0.15 across.
-    private static let contactRadius = 0.11
 
     var body: some View {
         VStack(spacing: 14) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text((flies[0].isEating ? "eat" : flies[0].behaviour.rawValue).uppercased())
+                    Text((lead.isEating ? "eat" : lead.behaviour.rawValue).uppercased())
                         .font(.system(.title2, design: .monospaced, weight: .bold))
                     Text(moodLine).font(.caption).foregroundStyle(.secondary)
                 }
@@ -75,22 +76,22 @@ struct BrainView: View {
             .pickerStyle(.segmented)
             .accessibilityIdentifier("tier")
 
-            FlyArena3DView(poses: flies.map(\.pose), behaviour: flies[0].behaviour,
+            FlyArena3DView(flies: flies.map { ($0.pose, $0.behaviour) },
                            spikes: frame?.spikes ?? [], neurons: frame?.neurons ?? 0,
-                           food: flies[0].food, positions: positions, rates: frame?.rates ?? [],
-                           lightsOn: flies[0].vitals.lightsOn,
+                           food: lead.food, positions: positions, rates: frame?.rates ?? [],
+                           lightsOn: lead.vitals.lightsOn,
                            // Where you tap decides which side's bristles fire, and the fly
                            // turns away through the real wiring, not through a rule of ours.
                            onTouch: { pendingTouch = $0 })
                 .aspectRatio(0.9, contentMode: .fit)
 
-            if eyeOn, let retina, !eyeResponse.isEmpty {
-                EyeView(retina: retina, response: eyeResponse, gain: 14)
+            if eyeOn, let sampler, sampler.response.contains(where: { $0 > 0 }) {
+                EyeView(sampler: sampler)
                     .frame(height: 96)
                     .transition(.opacity)
             }
 
-            VitalsView(vitals: flies[0].vitals, activity: frame?.flies.first?.activity ?? 0)
+            VitalsView(vitals: lead.vitals, activity: frame?.flies.first?.activity ?? 0)
 
             // Fast-forward. Segmented, so the speed is one tap and always visible.
             Picker("Speed", selection: $speed) {
@@ -117,16 +118,16 @@ struct BrainView: View {
                         .accessibilityIdentifier("removeFly")
                         .accessibilityLabel("Remove a fly")
                 }
-                if retina != nil {
+                if sampler != nil {
                     Button { eyeOn.toggle() } label: {
                         Label(eyeOn ? "Eye on" : "Eye", systemImage: eyeOn ? "eye.fill" : "eye")
                     }
                     .accessibilityIdentifier("eye")
                     .tint(eyeOn ? .orange : nil)
                 }
-                Button { care(flies[0].vitals.lightsOn ? .lightsOff : .lightsOn) } label: {
-                    Label(flies[0].vitals.lightsOn ? "Lights off" : "Lights on",
-                          systemImage: flies[0].vitals.lightsOn ? "moon.fill" : "sun.max.fill")
+                Button { care(lead.vitals.lightsOn ? .lightsOff : .lightsOn) } label: {
+                    Label(lead.vitals.lightsOn ? "Lights off" : "Lights on",
+                          systemImage: lead.vitals.lightsOn ? "moon.fill" : "sun.max.fill")
                 }
                 .accessibilityIdentifier("lights")
             }
@@ -164,12 +165,12 @@ struct BrainView: View {
             await loop(engine)
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { store.save(flies[0].vitals) }
+            if phase != .active { store.save(lead.vitals) }
         }
     }
 
     private var moodLine: String {
-        switch flies[0].vitals.mood {
+        switch lead.vitals.mood {
         case .happy: "happy · petted"
         case .content: "content"
         case .hungry: "hungry · feed me"
@@ -188,25 +189,17 @@ struct BrainView: View {
     /// A new colony member starts where the keeper is not looking and hungry in its own way,
     /// so it does not walk in lockstep with the first.
     private func newFly() -> Fly {
-        // The emptiest of a few candidate spots, so a colony spreads out instead of piling up
-        // on the one place `random` happened to like.
-        let spot = (0..<8).map { _ in (x: Double.random(in: 0.12...0.88), y: Double.random(in: 0.12...0.88)) }
-            .max { a, b in
-                let d = { (p: (x: Double, y: Double)) in
-                    flies.map { hypot($0.pose.x - p.x, $0.pose.y - p.y) }.min() ?? 1
-                }
-                return d(a) < d(b)
-            }!
+        let spot = Colony.spawn(among: flies.map(\.pose))
         var f = Fly(pose: FlyPose(x: spot.x, y: spot.y, heading: .random(in: 0...(2 * .pi))),
-                    vitals: flies[0].vitals)
+                    vitals: lead.vitals)
         f.vitals.food = .random(in: 0.5...1)
         return f
     }
 
     private func care(_ c: Care) {
         flies[0].vitals.apply(c)
-        store.save(flies[0].vitals)
-        log.notice("care \(c.rawValue, privacy: .public) · mood \(flies[0].vitals.mood.rawValue, privacy: .public)")
+        store.save(lead.vitals)
+        log.notice("care \(c.rawValue, privacy: .public) · mood \(lead.vitals.mood.rawValue, privacy: .public)")
     }
 
     private func loop(_ engine: FlyBrainEngine) async {
@@ -215,7 +208,7 @@ struct BrainView: View {
         // FLY_FEED=1 drops a morsel at launch: `make run FEED=1`, for screenshots and checks
         // that do not depend on driving a button.
         let env = ProcessInfo.processInfo.environment
-        if env["FLY_FEED"] != nil, flies[0].food == nil {
+        if env["FLY_FEED"] != nil, lead.food == nil {
             for i in flies.indices { flies[i].dropFood(at: Food(x: 0.75, y: 0.3)) }
         }
         if env["FLY_LIGHTS"] == "off" { for i in flies.indices { flies[i].vitals.apply(.lightsOff) } }
@@ -225,10 +218,17 @@ struct BrainView: View {
         }
         engine0 = engine
         colonyLimit = await engine.colonyLimit
-        log.notice("loop start · tier \(engine.tier.rawValue, privacy: .public) · fly at \(flies[0].pose.x, format: .fixed(precision: 2), privacy: .public),\(flies[0].pose.y, format: .fixed(precision: 2), privacy: .public)")
+        // The engine is rebuilt on a tier change while `flies` survives it, so the two can
+        // disagree — and a fly with no brain behind it freezes in place for ever with nothing
+        // on the record to say why. The engine owns the count; this follows it.
+        let alive = await engine.colony
+        if flies.count > alive { flies.removeLast(flies.count - alive) }
+        while flies.count < alive { flies.append(newFly()) }
+        log.notice("loop start · tier \(engine.tier.rawValue, privacy: .public) · fly at \(lead.pose.x, format: .fixed(precision: 2), privacy: .public),\(lead.pose.y, format: .fixed(precision: 2), privacy: .public)")
         positions = await engine.positions()
-        retina = await engine.retina
-        let sampler = await engine.retina.map(EyeSampler.init)
+        sampler = await engine.retina.map {
+            EyeSampler(retina: $0, width: EyeCamera.width, height: EyeCamera.height)
+        }
         // A fallback engine runs synthetic wiring whatever the tier says.
         fellBack = engine.fellBack
         flies[0].vitals.arousal = engine.fellBack ? .synthetic : tier.arousal
@@ -246,49 +246,42 @@ struct BrainView: View {
             if let side = pendingTouch {
                 pendingTouch = nil
                 flies[0].pet()
-                if flies[0].vitals.isSleeping || !flies[0].vitals.lightsOn { flies[0].vitals.apply(.lightsOn) }
+                if lead.vitals.isSleeping || !lead.vitals.lightsOn { flies[0].vitals.apply(.lightsOn) }
                 let at = await engine.touch(side: side)
                 log.notice("touch \(String(describing: side), privacy: .public) at step \(at, privacy: .public)")
             }
-            if flies[0].isEating {
+            if lead.isEating {
                 // Reward: the fly's dopaminergic cells fire while it eats. On FlyWire these
                 // are the 786 cells predicted DA (PAM/PPL clusters around the mushroom body);
                 // on synthetic wiring a stand-in block. Re-armed every frame; expires with
                 // the meal.
                 await engine.drive(population: "DA", current: 6.0, steps: UInt64(stepsPerFrame * speed * 3))
             }
-            if eyeOn, let sampler {
-                if !camera.isRunning {
-                    eyeFailure = await camera.start()
-                    if eyeFailure != nil { eyeOn = false }
-                }
-                if camera.isRunning {
-                    let grid = camera.frame()
-                    // Each eye reads its own half of the frame, so a turn sweeps one before
-                    // the other, the way a fly's overlapping fields do.
-                    let r = sampler.look(dt: dt) { u, v, isRight in
-                        let x = (Double(u) * 0.5 + (isRight ? 0.5 : 0)) * Double(EyeCamera.width - 1)
-                        let y = (1 - Double(v)) * Double(EyeCamera.height - 1)
-                        return grid[Int(y) * EyeCamera.width + Int(x)]
+            if let sampler {
+                if eyeOn {
+                    if !camera.isRunning {
+                        eyeFailure = await camera.start()
+                        if eyeFailure != nil { eyeOn = false }
                     }
-                    await engine.look(cells: sampler.cells, currents: r)
-                    eyeResponse = r
+                    if camera.isRunning {
+                        await engine.look(cells: sampler.cells,
+                                          currents: sampler.look(dt: dt, grid: camera.frame()))
+                    }
+                } else if camera.isRunning {
+                    camera.stop()
+                    sampler.rest()
+                    await engine.look(cells: sampler.cells, currents: sampler.response)
                 }
-            } else if camera.isRunning {
-                camera.stop()
-                sampler?.rest()
-                if let sampler { await engine.look(cells: sampler.cells, currents: sampler.response) }
-                eyeResponse = []
             }
-            if flies[0].vitals.noise != noise {
-                noise = flies[0].vitals.noise
+            if lead.vitals.noise != noise {
+                noise = lead.vitals.noise
                 await engine.setNoise(noise)
             }
             let f = await engine.frame(steps: stepsPerFrame * speed)
             // The old loop may be here when a tier switch cancels it; its frame must not
             // land on top of the new engine's state.
             if Task.isCancelled { return }
-            let hadFood = flies[0].food
+            let hadFood = lead.food
             // A real brain is read off its descending neurons; synthetic wiring has none, so
             // it keeps the whole-brain average and the app does not pretend otherwise.
             for i in flies.indices where i < f.flies.count {
@@ -302,8 +295,8 @@ struct BrainView: View {
             // the one sense measured to reach the descending neurons, so a colony jostles
             // through the real wiring rather than through a rule of ours.
             await jostle(engine)
-            if hadFood != nil && flies[0].food == nil {
-                log.notice("morsel gone · fly at \(flies[0].pose.x, format: .fixed(precision: 2), privacy: .public),\(flies[0].pose.y, format: .fixed(precision: 2), privacy: .public) · food \(flies[0].vitals.food, format: .fixed(precision: 2), privacy: .public) · dt \(dt, format: .fixed(precision: 3), privacy: .public)")
+            if hadFood != nil && lead.food == nil {
+                log.notice("morsel gone · fly at \(lead.pose.x, format: .fixed(precision: 2), privacy: .public),\(lead.pose.y, format: .fixed(precision: 2), privacy: .public) · food \(lead.vitals.food, format: .fixed(precision: 2), privacy: .public) · dt \(dt, format: .fixed(precision: 3), privacy: .public)")
             }
             frame = f
             count += 1
@@ -311,8 +304,8 @@ struct BrainView: View {
             // on screen is the exact false statement this receipt exists to prevent.
             if count == 1 || count % receiptEvery == 0 {
                 receipt = f.receipt
-                defer { bumps = 0 }
-                log.notice("receipt \(f.receipt.summary, privacy: .public) · activity \(f.flies.first?.activity ?? 0, format: .fixed(precision: 3), privacy: .public) · colony \(flies.count, privacy: .public) · bumps \(bumps, privacy: .public) · behaviour \(flies[0].behaviour.rawValue, privacy: .public) · mood \(flies[0].vitals.mood.rawValue, privacy: .public) · drive \(flies[0].command.drive, format: .fixed(precision: 2), privacy: .public) · steer \(flies[0].command.steer, format: .fixed(precision: 2), privacy: .public) · eye \(eyeOn ? "on" : "off", privacy: .public) · noise \(noise, format: .fixed(precision: 2), privacy: .public) · speed \(speed, privacy: .public)× · food \(flies[0].food.map { "\($0.x),\($0.y)" } ?? "none", privacy: .public) · eating \(flies[0].isEating, privacy: .public) · at \(flies[0].pose.x, format: .fixed(precision: 2), privacy: .public),\(flies[0].pose.y, format: .fixed(precision: 2), privacy: .public)")
+                log.notice("receipt \(f.receipt.summary, privacy: .public) · activity \(f.flies.first?.activity ?? 0, format: .fixed(precision: 3), privacy: .public) · colony \(flies.count, privacy: .public) · bumps \(bumps, privacy: .public) · behaviour \(lead.behaviour.rawValue, privacy: .public) · mood \(lead.vitals.mood.rawValue, privacy: .public) · drive \(lead.command.drive, format: .fixed(precision: 2), privacy: .public) · steer \(lead.command.steer, format: .fixed(precision: 2), privacy: .public) · eye \(eyeOn ? "on" : "off", privacy: .public) · noise \(noise, format: .fixed(precision: 2), privacy: .public) · speed \(speed, privacy: .public)× · food \(lead.food.map { "\($0.x),\($0.y)" } ?? "none", privacy: .public) · eating \(lead.isEating, privacy: .public) · at \(lead.pose.x, format: .fixed(precision: 2), privacy: .public),\(lead.pose.y, format: .fixed(precision: 2), privacy: .public)")
+                bumps = 0
             }
             // Deadline, not "sleep after work", and re-based on overrun: a slow tier drops
             // frames instead of accruing debt, and a resume from background is not 30 s of
@@ -322,24 +315,13 @@ struct BrainView: View {
         }
     }
 
-    /// Pairwise contact. The distance is two half-bodies, not the reach used for food: a fly
-    /// eats at arm's length and collides at its own width, and using the eating radius meant
-    /// two flies could stand touching and register nothing.
+    /// Who bumped into whom, in one hop. The rule itself is `Colony.contacts`, in FlyKit
+    /// with the other spatial rules and their tests.
     private func jostle(_ engine: FlyBrainEngine) async {
-        guard flies.count > 1 else { return }
-        for i in flies.indices {
-            for j in (i + 1)..<flies.count {
-                let a = flies[i].pose, b = flies[j].pose
-                let dx = b.x - a.x, dy = b.y - a.y
-                guard hypot(dx, dy) < Self.contactRadius, abs(a.z - b.z) < 0.1 else { continue }
-                // Which side of me is it on: the sign of the cross product with my heading.
-                let across = cos(a.heading) * dy - sin(a.heading) * dx
-                bumps += 1
-                await engine.touch(side: across > 0 ? .right : .left, fly: i)
-                let backAcross = cos(b.heading) * -dy - sin(b.heading) * -dx
-                await engine.touch(side: backAcross > 0 ? .right : .left, fly: j)
-            }
-        }
+        let contacts = Colony.contacts(flies.map(\.pose))
+        guard !contacts.isEmpty else { return }
+        bumps += contacts.count / 2
+        await engine.touch(contacts)
     }
 
     private func seconds(_ d: Duration) -> Double {

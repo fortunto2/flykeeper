@@ -37,6 +37,13 @@ public struct BehaviourReadout: Sendable, Equatable {
     /// `activity` is the mean fraction of neurons firing per step over the last frame
     /// (0...1). A frame mean, not a single step: one 1 ms sample of a 700-cell population
     /// flips the label at frame rate.
+    /// The same command shape the descending readout produces, so the rest of the app has
+    /// one way to be told what the fly is doing rather than two. Synthetic wiring has no
+    /// sides to compare, so it can say how hard but never which way.
+    public func command(activity: Double) -> MotorCommand {
+        MotorCommand(drive: (activity / max(turnRate, 1e-9)).clamped(to: 0...1), steer: 0)
+    }
+
     public func behaviour(activity: Double, recentTouch: Bool) -> Behaviour {
         if recentTouch && activity >= startleRate { return .startle }
         if activity >= turnRate { return .turn }

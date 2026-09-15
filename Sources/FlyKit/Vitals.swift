@@ -178,5 +178,5 @@ public struct Vitals: Sendable, Equatable, Codable {
         food = clamp(food + dt / rates.eatDuration)
     }
 
-    private func clamp(_ x: Double) -> Double { min(max(x, 0), 1) }
+    private func clamp(_ x: Double) -> Double { x.clamped(to: 0...1) }
 }

@@ -17,29 +17,26 @@ Writes `retina.frt` next to brain.fcb:
 with u, v in 0…1 across that eye.
 """
 import csv
-import gzip
 import struct
 import sys
 from pathlib import Path
 
 import numpy as np
 
-
-def open_any(dir_: Path, stem: str):
-    for name in (f"{stem}.csv.gz", f"{stem}.csv"):
-        p = dir_ / name
-        if p.exists():
-            return (gzip.open(p, "rt") if name.endswith(".gz") else p.open())
-    sys.exit(f"missing {stem}.csv(.gz) in {dir_}")
+sys.path.insert(0, str(Path(__file__).parent))
+from flywire_io import open_any
 
 
 def main(dir_: Path):
-    rows = list(csv.DictReader((dir_ / "positions.csv").open()))
+    f, _ = open_any(dir_, "positions")
+    with f:
+        rows = list(csv.DictReader(f))
     order = {int(r["root_id"]): i for i, r in enumerate(rows)}
     xyz = np.array([[float(r["x_um"]), float(r["y_um"]), float(r["z_um"])] for r in rows])
 
     sides: dict[str, list[int]] = {"left": [], "right": []}
-    with open_any(dir_, "classification") as f:
+    f, _ = open_any(dir_, "classification")
+    with f:
         for row in csv.DictReader(f):
             if row["sub_class"] == "photo_receptor" and row["side"] in sides:
                 i = order.get(int(row["root_id"]))

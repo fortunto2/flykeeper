@@ -53,7 +53,7 @@ import Testing
 @Test func walkingWandersInsteadOfGoingStraight() {
     let motion = FlyMotion()
     var pose = FlyPose(x: 0.5, y: 0.5, heading: 0)
-    for _ in 0..<200 { pose = motion.advance(pose, behaviour: .walk, dt: 0.05) }
+    for _ in 0..<200 { pose = motion.advance(pose, command: .full, behaviour: .walk, dt: 0.05) }
     #expect(pose.heading != 0, "a walk should curve")
 }
 

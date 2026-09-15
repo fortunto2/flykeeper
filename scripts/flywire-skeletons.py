@@ -26,12 +26,8 @@ from pathlib import Path
 
 import numpy as np
 
-
-def read_ids(fcb: Path) -> list[int]:
-    with fcb.open("rb") as f:
-        assert f.read(4) == b"FCB1"
-        n, _ = struct.unpack("<II", f.read(8))
-        return list(struct.unpack(f"<{n}Q", f.read(8 * n)))
+sys.path.insert(0, str(Path(__file__).parent))
+from flywire_io import read_fcb_ids
 
 
 def decimate(text: str, max_segments: int) -> np.ndarray:
@@ -83,7 +79,7 @@ def main():
     max_segments = int(args[args.index("--segments") + 1]) if "--segments" in args else 60
     seed = int(args[args.index("--seed") + 1]) if "--seed" in args else 1
 
-    ids = read_ids(dir_ / "brain.fcb")
+    ids = read_fcb_ids(dir_ / "brain.fcb")
     pops = json.loads((dir_ / "populations.json").read_text())
     z = zipfile.ZipFile(zpath)
     have = {int(Path(n).stem): n for n in z.namelist() if n.endswith(".swc")}

@@ -85,10 +85,18 @@ public struct FlyMotion: Sendable, Equatable {
         self.saccadeThreshold = saccadeThreshold
     }
 
-    /// Move the fly under a command read from its descending neurons: `drive` is how hard it
-    /// is pushing, `steer` which way. Turning comes out as saccades — a straight run, then a
-    /// fast flick — because that is the shape of a walking fly's path, and a heading that
-    /// eases round a curve reads as a toy however right the speed is.
+    /// Move the fly. `command` is what its brain is telling the body — `drive` how hard,
+    /// `steer` which way — and `behaviour` is what that reads as. One entry point: the
+    /// synthetic readout produces a command too, so "which readout made this" is settled
+    /// where the command is built and travels no further.
+    ///
+    /// `toward`: a point in the arena the fly is heading for; when set the heading turns
+    /// towards it instead of wandering. Locomotion still comes from the behaviour — a brain
+    /// that says rest keeps a hungry fly sitting next to its food.
+    ///
+    /// Turning comes out as saccades — a straight run, then a fast flick — because that is
+    /// the shape of a walking fly's path, and a heading that eases round a curve reads as a
+    /// toy however right the speed is.
     public func advance(_ pose: FlyPose, command: MotorCommand, behaviour: Behaviour,
                         dt: Double, toward: (x: Double, y: Double)? = nil) -> FlyPose {
         var next = pose
@@ -101,30 +109,10 @@ public struct FlyMotion: Sendable, Equatable {
             // arena's frame (y down the screen) that is a positive heading change.
             next.saccadeDirection = command.steer > 0 ? 1 : -1
         }
-        // Airborne and startle still own the body: a fly in the air lands before it walks.
-        if behaviour == .startle || pose.isAirborne {
-            return motion(next, behaviour: behaviour, dt: dt, toward: nil, overrideSpeed: nil)
-        }
-        let speed = behaviour == .sleep || behaviour == .rest || behaviour == .groom
-            ? 0 : walkSpeed * command.drive
-        return motion(next, behaviour: behaviour, dt: dt, toward: toward, overrideSpeed: speed)
-    }
 
-    /// `toward`: a point in the arena the fly is heading for; when set, the heading turns
-    /// towards it (at `turnRate`) instead of wandering. Locomotion itself still comes from
-    /// the behaviour — a brain that says rest keeps a hungry fly sitting next to its food.
-    public func advance(_ pose: FlyPose, behaviour: Behaviour, dt: Double, toward: (x: Double, y: Double)? = nil) -> FlyPose {
-        motion(pose, behaviour: behaviour, dt: dt, toward: toward, overrideSpeed: nil)
-    }
-
-    /// The one body model both readouts drive, so a change to walking cannot apply to only
-    /// half the app.
-    private func motion(_ pose: FlyPose, behaviour: Behaviour, dt: Double,
-                        toward: (x: Double, y: Double)?, overrideSpeed: Double?) -> FlyPose {
-        var next = pose
         let speed: Double
         if behaviour == .startle {
-            // Take off: up and away.
+            // Take off: up and away. Drive does not scale an escape — that is the point of one.
             speed = startleSpeed
             next.z += climbRate * dt
             next.wingBeat = 1
@@ -138,15 +126,17 @@ public struct FlyMotion: Sendable, Equatable {
         } else {
             next.wingBeat = max(0, next.wingBeat - wingDecay * dt)
             let gait: Double
-            let (behaviourSpeed, behaviourGait): (Double, Double) = switch behaviour {
+            // Legs keep pace with the body: a fly barely being driven steps slowly, and a
+            // gait that runs at one rate under every drive is the tell of an animation
+            // rather than a walk.
+            (speed, gait) = switch behaviour {
             case .rest, .sleep, .startle: (0, 0)
-            case .walk: (walkSpeed, gaitRate)
-            case .turn: (walkSpeed * turnCreep, gaitRate)
+            case .walk: (walkSpeed * command.drive, gaitRate * command.drive)
+            case .turn: (walkSpeed * turnCreep * command.drive, gaitRate * command.drive)
             case .groom: (0, groomRate)
             }
-            speed = overrideSpeed ?? behaviourSpeed
-            gait = speed > 0 || behaviour == .groom ? max(behaviourGait, gaitRate * speed / max(walkSpeed, 1e-9)) : behaviourGait
-            if behaviour == .turn && overrideSpeed == nil { next.heading += turnRate * dt }
+            // A saccade already owns the heading; a `.turn` outside one still swings.
+            if behaviour == .turn, next.saccadeLeft <= 0 { next.heading += turnRate * dt }
             if let toward, speed > 0 {
                 let want = atan2(toward.y - next.y, toward.x - next.x)
                 var delta = want - next.heading
@@ -165,13 +155,13 @@ public struct FlyMotion: Sendable, Equatable {
         // a fly nobody can see.
         if next.x < 0 || next.x > 1 {
             next.heading = .pi - next.heading
-            next.x = min(max(next.x, 0), 1)
+            next.x = next.x.clamped(to: 0...1)
         }
         if next.y < 0 || next.y > 1 {
             next.heading = -next.heading
-            next.y = min(max(next.y, 0), 1)
+            next.y = next.y.clamped(to: 0...1)
         }
-        next.z = min(max(next.z, 0), 1)
+        next.z = next.z.clamped(to: 0...1)
         return next
     }
 }
