@@ -15,12 +15,16 @@ APP=$(xcodebuild -project Flykeeper.xcodeproj -scheme Flykeeper -sdk iphonesimul
       | awk -F' = ' '/^ *BUILT_PRODUCTS_DIR = /{d=$2} /^ *FULL_PRODUCT_NAME = /{n=$2} END{print d"/"n}')
 test -d "$APP" || { echo "no app bundle — run make build first"; exit 1; }
 
-# name:tier:feed:lights:settle seconds
+# name:tier:feed:lights:fresh:settle
+# `fresh` uninstalls first, which is the only way back to the welcome screen — it is gated
+# on a UserDefaults flag the app writes the moment you leave it. Every other scene then runs
+# with FLY_WELCOME=off, because the wipe would otherwise put that screen in front of all of them.
 SCENES=(
-  "full-brain:full::: 16"
-  "eating:full:1:: 24"
-  "asleep:full::off: 16"
-  "eco:eco:1:: 8"
+  "welcome:standard:::fresh: 14"
+  "full-brain:full:::: 16"
+  "eating:full:1::: 24"
+  "asleep:full::off:: 16"
+  "eco:eco:1::: 8"
 )
 
 for sim in shot-69 shot-65; do
@@ -31,9 +35,14 @@ for sim in shot-69 shot-65; do
   xcrun simctl install "$udid" "$APP"
   xcrun simctl status_bar "$udid" override --time "9:41" --cellularBars 4 --wifiBars 3 --batteryState charged --batteryLevel 100
   for scene in "${SCENES[@]}"; do
-    IFS=':' read -r name tier feed lights settle <<< "$scene"
+    IFS=':' read -r name tier feed lights fresh settle <<< "$scene"
     xcrun simctl terminate "$udid" co.superduperai.flykeeper 2>/dev/null || true
+    if [ "${fresh# }" = fresh ]; then
+      xcrun simctl uninstall "$udid" co.superduperai.flykeeper 2>/dev/null || true
+      xcrun simctl install "$udid" "$APP"
+    fi
     env_args=(SIMCTL_CHILD_FLY_TIER="$tier")
+    [ "$name" = welcome ] || env_args+=(SIMCTL_CHILD_FLY_WELCOME=off)
     [ -n "$feed" ] && env_args+=(SIMCTL_CHILD_FLY_FEED=1)
     [ -n "$lights" ] && env_args+=(SIMCTL_CHILD_FLY_LIGHTS="$lights")
     env "${env_args[@]}" xcrun simctl launch "$udid" co.superduperai.flykeeper >/dev/null

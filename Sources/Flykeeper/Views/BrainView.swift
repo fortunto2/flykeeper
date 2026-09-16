@@ -21,7 +21,12 @@ struct BrainView: View {
     @State private var tier: SimulationTier =
         SimulationTier(rawValue: ProcessInfo.processInfo.environment["FLY_TIER"] ?? "") ?? .standard
     /// Shown once, and from About after that. The brain loads behind it.
-    @AppStorage("hasMetTheFly") private var hasMetTheFly = false
+    ///
+    /// FLY_WELCOME=off starts past it on a fresh container, the same way FLY_TIER starts on a
+    /// tier: every screenshot after the welcome one is taken on a just-installed app, and
+    /// without this they would all be pictures of the welcome screen.
+    @AppStorage("hasMetTheFly") private var hasMetTheFly =
+        ProcessInfo.processInfo.environment["FLY_WELCOME"] == "off"
     /// The colony. `flies[0]` is the one whose brain is drawn and whose eye the camera feeds;
     /// the rest share its wiring and live their own lives over it.
     @State private var flies = [Fly(vitals: FlyStore().load())]
