@@ -4,7 +4,10 @@
     python3 scripts/upload-screenshots.py <version-id> <locale> <displayType> <file>...
 
 The set is replaced, not appended to: the store shows screenshots in upload order, so the
-only way to control that order is to start from an empty set every time.
+only way to control that order is to start from an empty set every time. Clearing a set you
+then cannot refill destroys a working listing, and Apple's reserve endpoint has spent hours
+returning 500 while DELETE kept working — so a throwaway reservation is made and deleted
+first, and nothing is cleared unless it succeeded.
 
 The API wants a three-step dance per image: reserve (which returns signed upload
 operations), PUT the bytes at each operation, then commit with the file's MD5. Anything
@@ -52,6 +55,20 @@ def screenshot_set(localization_id: str, display_type: str) -> str:
     return made["data"]["id"]
 
 
+def reserve(set_id: str, name: str, size: int) -> dict:
+    return call("POST", f"{API}/appScreenshots", {
+        "data": {"type": "appScreenshots",
+                 "attributes": {"fileSize": size, "fileName": name},
+                 "relationships": {"appScreenshotSet": {
+                     "data": {"type": "appScreenshotSets", "id": set_id}}}}})
+
+
+def probe(set_id: str, path: Path) -> None:
+    """Fail before clearing, not after."""
+    made = reserve(set_id, f"probe-{path.name}", path.stat().st_size)
+    call("DELETE", f"{API}/appScreenshots/{made['data']['id']}")
+
+
 def clear(set_id: str) -> int:
     shots = call("GET", f"{API}/appScreenshotSets/{set_id}/appScreenshots")
     for shot in shots.get("data", []):
@@ -61,11 +78,7 @@ def clear(set_id: str) -> int:
 
 def upload(set_id: str, path: Path) -> str:
     blob = path.read_bytes()
-    made = call("POST", f"{API}/appScreenshots", {
-        "data": {"type": "appScreenshots",
-                 "attributes": {"fileSize": len(blob), "fileName": path.name},
-                 "relationships": {"appScreenshotSet": {
-                     "data": {"type": "appScreenshotSets", "id": set_id}}}}})
+    made = reserve(set_id, path.name, len(blob))
     shot_id = made["data"]["id"]
     for op in made["data"]["attributes"]["uploadOperations"]:
         req = urllib.request.Request(op["url"], method=op["method"],
@@ -85,6 +98,7 @@ def main():
     locs = call("GET", f"{API}/appStoreVersions/{version_id}/appStoreVersionLocalizations")
     loc_id = next(l["id"] for l in locs["data"] if l["attributes"]["locale"] == locale)
     set_id = screenshot_set(loc_id, display_type)
+    probe(set_id, Path(files[0]))
     print(f"cleared {clear(set_id)} existing", flush=True)
     for f in files:
         print(f"{Path(f).name} -> {upload(set_id, Path(f))}", flush=True)
