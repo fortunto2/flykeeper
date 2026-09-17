@@ -11,6 +11,10 @@ pretending otherwise.
 
 <img src="docs/screenshots/full-brain.png" width="280" alt="The full brain, heat-mapped by firing rate, above the fly">
 
+**[72-second recording of the app running](docs/flykeeper-tour.mp4)** — launch, the brain
+loading and lighting up, feeding, a touch. Taken on a simulator, unedited apart from the
+trim; the steps-per-second counter on the first screen is the real one.
+
 ## What is real and what is ours
 
 | | |
