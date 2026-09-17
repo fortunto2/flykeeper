@@ -16,3 +16,6 @@ data/
 # Xcode build logs and the icon preview renders
 build/
 *.xcdistributionlogs
+
+__pycache__/
+*.pyc
