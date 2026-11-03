@@ -1,3 +1,6 @@
+> **This policy has moved to https://superduperai.co/products/flykeeper/privacy/**, the one canonical copy
+> (checked against the app's code). This file is kept for its history and is no longer updated.
+
 # Privacy Policy — Flykeeper
 
 **Last updated: 14 September 2026**
